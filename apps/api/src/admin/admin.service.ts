@@ -41,6 +41,12 @@ import * as path from "path";
 import { DianCertificateService } from "../fiscal/dian-certificate.service";
 import { OnboardingService } from "../onboarding/onboarding.service";
 import { TaxDefinitionService } from "../tax/tax-definition.service";
+import {
+  formatPinHash,
+  isValidPinFormat,
+  kioskHasAdminPin,
+  KioskSettings,
+} from "../common/pin.util";
 
 @Injectable()
 export class AdminService {
@@ -90,7 +96,7 @@ export class AdminService {
     const branch = await this.branchContext(branchId, user.tenantId);
     const { branchSettings } = await this.tenantBranchSettings(branch, branchId);
     const printers = (branchSettings.printers ?? {}) as Record<string, string>;
-    const kiosk = (branchSettings.kiosk ?? {}) as { waiterExitPin?: string };
+    const kiosk = (branchSettings.kiosk ?? {}) as KioskSettings;
     const paymentMethods = (branchSettings.paymentMethods as { enabled?: string[] } | undefined)?.enabled;
 
     const [
@@ -142,7 +148,7 @@ export class AdminService {
       { id: "warehouses", label: "Bodegas", ok: warehouses > 0, blocking: true, count: warehouses },
       { id: "fiscal_resolution", label: "Resolución fiscal activa", ok: resolutions > 0, blocking: true, count: resolutions },
       { id: "payment_methods", label: "Métodos de pago configurados", ok: (paymentMethods?.length ?? 0) > 0, blocking: true },
-      { id: "kiosk_pin", label: "PIN modo mesero", ok: Boolean(kiosk.waiterExitPin?.trim()), blocking: true },
+      { id: "kiosk_pin", label: "PIN administrador (modo mesero)", ok: kioskHasAdminPin(kiosk), blocking: true },
       { id: "printers", label: "IP impresora caja", ok: Boolean(printers.cashPrinterIp?.trim()), blocking: false },
       { id: "kitchen_printer", label: "IP impresora cocina", ok: Boolean(printers.kitchenPrinterIp?.trim()), blocking: false },
       { id: "fiscal_cert", label: "Certificado DIAN (.p12)", ok: certInfo.loaded, blocking: false, note: "Requerido para facturación real" },
@@ -172,8 +178,8 @@ export class AdminService {
     if (!(branchSettings.paymentMethods as { enabled?: string[] } | undefined)?.enabled?.length) {
       patch.paymentMethods = { enabled: ["cash", "card", "transfer", "qr"] };
     }
-    if (!(branchSettings.kiosk as { waiterExitPin?: string } | undefined)?.waiterExitPin) {
-      patch.kiosk = { ...(branchSettings.kiosk as object ?? {}), waiterExitPin: "2025" };
+    if (!kioskHasAdminPin(branchSettings.kiosk as KioskSettings | undefined)) {
+      patch.kiosk = { adminPinHash: formatPinHash("2025") };
     }
     const printers = (branchSettings.printers ?? {}) as Record<string, string>;
     if (!printers.cashPrinterIp) {
@@ -449,13 +455,66 @@ export class AdminService {
     return updated;
   }
 
+  private resolvePinHash(dto: { pin?: string; clearPin?: boolean }): string | null | undefined {
+    if (dto.clearPin) return null;
+    if (!dto.pin?.trim()) return undefined;
+    if (!isValidPinFormat(dto.pin.trim())) {
+      throw new BadRequestException("PIN debe ser de 4 a 6 dígitos numéricos");
+    }
+    return formatPinHash(dto.pin.trim());
+  }
+
+  private async assertPinUnique(
+    tenantId: string,
+    pin: string,
+    exclude?: { userId?: string; staffId?: string },
+  ) {
+    const pinHash = formatPinHash(pin);
+    const [staffHit, userHit] = await Promise.all([
+      this.prisma.staff.findFirst({
+        where: {
+          pinHash,
+          isActive: true,
+          branch: { company: { tenantId } },
+          ...(exclude?.staffId ? { id: { not: exclude.staffId } } : {}),
+        },
+        select: { id: true, name: true },
+      }),
+      this.prisma.user.findFirst({
+        where: {
+          tenantId,
+          pinHash,
+          isActive: true,
+          ...(exclude?.userId ? { id: { not: exclude.userId } } : {}),
+        },
+        select: { id: true, name: true },
+      }),
+    ]);
+    if (staffHit || userHit) {
+      throw new BadRequestException("Ese PIN ya está asignado a otro mesero o usuario");
+    }
+  }
+
+  private mapStaffRow<T extends { pinHash?: string | null }>(row: T) {
+    const { pinHash, ...rest } = row;
+    return { ...rest, hasPin: Boolean(pinHash) };
+  }
+
+  private mapUserRow<T extends { pinHash?: string | null }>(row: T) {
+    const { pinHash, ...rest } = row;
+    return { ...rest, hasPin: Boolean(pinHash) };
+  }
+
   async listStaff(branchId: string, user: AuthUser) {
     await this.branchContext(branchId, user.tenantId);
-    return this.prisma.staff.findMany({ where: { branchId }, orderBy: { name: "asc" } });
+    const rows = await this.prisma.staff.findMany({ where: { branchId }, orderBy: { name: "asc" } });
+    return rows.map((r) => this.mapStaffRow(r));
   }
 
   async createStaff(branchId: string, user: AuthUser, dto: UpsertStaffDto) {
     const branch = await this.branchContext(branchId, user.tenantId);
+    const pinHash = this.resolvePinHash(dto);
+    if (dto.pin?.trim()) await this.assertPinUnique(user.tenantId, dto.pin.trim());
     const created = await this.prisma.staff.create({
       data: {
         companyId: branch.companyId,
@@ -464,16 +523,19 @@ export class AdminService {
         role: dto.role as StaffRole,
         phone: dto.phone ?? null,
         isActive: dto.isActive ?? true,
+        ...(pinHash !== undefined ? { pinHash } : {}),
       },
     });
-    await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "create", entity: "staff", entityId: created.id, branchId, payload: dto });
-    return created;
+    await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "create", entity: "staff", entityId: created.id, branchId, payload: { name: dto.name, role: dto.role } });
+    return this.mapStaffRow(created);
   }
 
   async updateStaff(branchId: string, user: AuthUser, id: string, dto: UpsertStaffDto) {
     await this.branchContext(branchId, user.tenantId);
     const staff = await this.prisma.staff.findFirst({ where: { id, branchId } });
     if (!staff) throw new NotFoundException("Personal no encontrado");
+    const pinHash = this.resolvePinHash(dto);
+    if (dto.pin?.trim()) await this.assertPinUnique(user.tenantId, dto.pin.trim(), { staffId: id });
     const updated = await this.prisma.staff.update({
       where: { id },
       data: {
@@ -481,10 +543,11 @@ export class AdminService {
         role: dto.role as StaffRole,
         phone: dto.phone ?? null,
         isActive: dto.isActive ?? staff.isActive,
+        ...(pinHash !== undefined ? { pinHash } : {}),
       },
     });
-    await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "update", entity: "staff", entityId: id, branchId, payload: dto });
-    return updated;
+    await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "update", entity: "staff", entityId: id, branchId, payload: { name: dto.name, role: dto.role } });
+    return this.mapStaffRow(updated);
   }
 
   async deleteStaff(branchId: string, user: AuthUser, id: string) {
@@ -496,7 +559,7 @@ export class AdminService {
 
   async listUsers(user: AuthUser) {
     await this.permissions.ensureDefaultRoles(user.tenantId);
-    return this.prisma.user.findMany({
+    const rows = await this.prisma.user.findMany({
       where: { tenantId: user.tenantId },
       orderBy: { name: "asc" },
       select: {
@@ -505,12 +568,14 @@ export class AdminService {
         name: true,
         role: true,
         roleId: true,
+        pinHash: true,
         isActive: true,
         lastLoginAt: true,
         createdAt: true,
         tenantRole: { select: { id: true, name: true, slug: true, isSystem: true } },
       },
     });
+    return rows.map((r) => this.mapUserRow(r));
   }
 
   private async resolveUserRoleAssignment(tenantId: string, dto: { roleId?: string; role?: string }) {
@@ -542,6 +607,8 @@ export class AdminService {
     if (assignment.role === "owner" && user.role !== "owner" && !hasPermission(user.permissions, "*")) {
       throw new BadRequestException("Solo el propietario puede crear usuarios owner");
     }
+    const pinHash = this.resolvePinHash(dto);
+    if (dto.pin?.trim()) await this.assertPinUnique(user.tenantId, dto.pin.trim());
     const created = await this.prisma.user.create({
       data: {
         tenantId: user.tenantId,
@@ -551,6 +618,7 @@ export class AdminService {
         roleId: assignment.roleId,
         passwordHash: this.auth.formatPasswordHash(dto.password),
         isActive: dto.isActive ?? true,
+        ...(pinHash !== undefined ? { pinHash } : {}),
       },
       select: {
         id: true,
@@ -558,6 +626,7 @@ export class AdminService {
         name: true,
         role: true,
         roleId: true,
+        pinHash: true,
         isActive: true,
         tenantRole: { select: { id: true, name: true, slug: true } },
       },
@@ -570,7 +639,7 @@ export class AdminService {
       entityId: created.id,
       payload: { email: dto.email, role: assignment.role, roleId: assignment.roleId },
     });
-    return created;
+    return this.mapUserRow(created);
   }
 
   async updateUser(user: AuthUser, id: string, dto: UpsertUserDto) {
@@ -583,6 +652,8 @@ export class AdminService {
     if (assignment.role === "owner" && user.role !== "owner" && !hasPermission(user.permissions, "*")) {
       throw new BadRequestException("Solo el propietario puede asignar rol owner");
     }
+    const pinHash = this.resolvePinHash(dto);
+    if (dto.pin?.trim()) await this.assertPinUnique(user.tenantId, dto.pin.trim(), { userId: id });
     const updated = await this.prisma.user.update({
       where: { id },
       data: {
@@ -592,6 +663,7 @@ export class AdminService {
         roleId: assignment.roleId,
         isActive: dto.isActive ?? target.isActive,
         ...(dto.password ? { passwordHash: this.auth.formatPasswordHash(dto.password) } : {}),
+        ...(pinHash !== undefined ? { pinHash } : {}),
       },
       select: {
         id: true,
@@ -599,6 +671,7 @@ export class AdminService {
         name: true,
         role: true,
         roleId: true,
+        pinHash: true,
         isActive: true,
         tenantRole: { select: { id: true, name: true, slug: true } },
       },
@@ -611,7 +684,7 @@ export class AdminService {
       entityId: id,
       payload: { email: dto.email, role: assignment.role, roleId: assignment.roleId },
     });
-    return updated;
+    return this.mapUserRow(updated);
   }
 
   async resetUserPassword(user: AuthUser, id: string, dto: ResetPasswordDto) {

@@ -2,9 +2,11 @@ import { useMemo } from "react";
 import { useAdmin } from "../AdminContext";
 import { ADMIN_NAV_GROUPS } from "../types";
 import { adminStyles } from "./AdminUi";
+import { useIsTablet } from "../../../lib/useMediaQuery";
 
 export function AdminSidebar() {
   const { activeTab, setActiveTab, accessibleTabs, user } = useAdmin();
+  const isTablet = useIsTablet();
 
   const navGroups = useMemo(
     () =>
@@ -15,8 +17,27 @@ export function AdminSidebar() {
     [accessibleTabs],
   );
 
+  if (isTablet) {
+    return (
+      <select
+        className="yall-admin-mobile-picker"
+        value={activeTab}
+        onChange={(e) => setActiveTab(e.target.value as typeof activeTab)}
+        aria-label="Sección de administración"
+      >
+        {navGroups.map((group) => (
+          <optgroup key={group.title} label={group.title}>
+            {group.tabs.map((t) => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    );
+  }
+
   return (
-    <aside style={adminStyles.sidebar}>
+    <aside className="yall-admin-sidebar">
       <h2 style={{ margin: "0 0 4px", fontSize: 18, color: "var(--t-fg)" }}>Administración</h2>
       <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--t-muted)", lineHeight: 1.4 }}>
         Parametrización del restaurante
@@ -45,6 +66,7 @@ export function AdminSidebar() {
             <button
               key={t.id}
               type="button"
+              className="yall-touch-btn"
               style={adminStyles.navBtn(activeTab === t.id)}
               onClick={() => setActiveTab(t.id)}
             >

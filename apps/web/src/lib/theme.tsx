@@ -12,7 +12,11 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [dark, setDarkState] = useState(() => localStorage.getItem(STORAGE_KEY) === "dark");
+  const [dark, setDarkState] = useState(() => {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored === "dark" || stored === "light") return stored === "dark";
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  });
 
   useEffect(() => {
     document.documentElement.dataset.theme = dark ? "dark" : "light";
@@ -72,11 +76,32 @@ export const ui = {
     padding: "8px 16px",
     borderRadius: 8,
     border: "none",
-    background: "#2563eb",
-    color: "#fff",
+    background: "var(--t-primary)",
+    color: "var(--t-primary-fg)",
     cursor: "pointer",
     fontWeight: 600,
     fontSize: 13,
   },
   muted: { color: "var(--t-muted)" },
+  successFg: { color: "var(--t-success-fg)" },
+  warnFg: { color: "var(--t-warn-fg)" },
+  dangerFg: { color: "var(--t-danger-fg)" },
+  link: { color: "var(--t-link)" },
+} as const;
+
+/** Colores semánticos para estilos inline */
+export const tc = {
+  fg: "var(--t-fg)",
+  muted: "var(--t-muted)",
+  card: "var(--t-card)",
+  success: "var(--t-success-fg)",
+  warn: "var(--t-warn-fg)",
+  danger: "var(--t-danger-fg)",
+  green: "var(--t-green-fg)",
+  red: "var(--t-red-fg)",
+  orange: "var(--t-orange-fg)",
+  link: "var(--t-link)",
+  accent: "var(--t-accent-fg)",
+  primary: "var(--t-primary)",
+  primaryFg: "var(--t-primary-fg)",
 } as const;

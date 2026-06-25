@@ -306,7 +306,7 @@ export default function Dashboard({ branchId }: { branchId: string }) {
               </button>
               <button
                 onClick={() => setReportX(null)}
-                style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}
               >
                 Cerrar
               </button>
@@ -396,7 +396,7 @@ export default function Dashboard({ branchId }: { branchId: string }) {
               <button
                 onClick={openCashSession}
                 disabled={openingSession}
-                style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}
+                style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}
               >
                 {openingSession ? "Abriendo…" : "Abrir caja del día"}
               </button>
@@ -419,7 +419,7 @@ export default function Dashboard({ branchId }: { branchId: string }) {
                     onChange={(e) => setClosingCash(e.target.value)}
                     style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
                   />
-                  <button onClick={closeCash} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#dc2626", color: "#fff", cursor: "pointer" }}>
+                  <button onClick={closeCash} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "var(--t-red-fg)", color: "var(--t-primary-fg)", cursor: "pointer" }}>
                     Cerrar caja
                   </button>
                   </div>
@@ -509,10 +509,10 @@ export default function Dashboard({ branchId }: { branchId: string }) {
                       }}>
                         <span>{w.waiterName}</span>
                         <span style={{ color: "var(--t-muted)" }}>{w.withinSlaCount}/{w.count}</span>
-                        <span style={{ color: w.breached ? "#b91c1c" : "#166534", fontWeight: 600 }}>
+                        <span style={{ color: w.breached ? "var(--t-danger-fg)" : "var(--t-success-fg)", fontWeight: 600 }}>
                           {w.compliancePct}%
                         </span>
-                        <strong style={{ color: w.breached ? "#b91c1c" : "#2563eb" }}>
+                        <strong style={{ color: w.breached ? "var(--t-danger-fg)" : "var(--t-link)" }}>
                           {w.avgWaitMinutes} min
                         </strong>
                       </div>
@@ -551,7 +551,7 @@ export default function Dashboard({ branchId }: { branchId: string }) {
                           {new Date(row.servedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
                         </div>
                       </div>
-                      <strong style={{ color: row.waitMinutes >= 10 ? "#b91c1c" : "#2563eb" }}>
+                      <strong style={{ color: row.waitMinutes >= 10 ? "var(--t-danger-fg)" : "var(--t-link)" }}>
                         {row.waitMinutes} min
                       </strong>
                     </div>
@@ -642,10 +642,10 @@ export default function Dashboard({ branchId }: { branchId: string }) {
                       }}>
                         <span>{w.waiterName}</span>
                         <span style={{ color: "var(--t-muted)" }}>{w.withinSlaCount}/{w.count}</span>
-                        <span style={{ color: w.breached ? "#b91c1c" : "#166534", fontWeight: 600 }}>
+                        <span style={{ color: w.breached ? "var(--t-danger-fg)" : "var(--t-success-fg)", fontWeight: 600 }}>
                           {w.compliancePct}%
                         </span>
-                        <strong style={{ color: w.breached ? "#b91c1c" : "#2563eb" }}>
+                        <strong style={{ color: w.breached ? "var(--t-danger-fg)" : "var(--t-link)" }}>
                           {w.avgWaitMinutes} min prom.
                         </strong>
                       </div>

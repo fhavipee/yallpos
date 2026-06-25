@@ -5,6 +5,7 @@ import { printInvoiceReceipt, printKitchenTicket, printKitchenVoidTicket } from 
 import { dispatchTableUpdated, TABLE_READY_EVENT, TABLE_SERVED_EVENT, type TableReadyDetail, type TableServedDetail } from "../lib/kdsSocket";
 import PaymentModal from "../components/PaymentModal";
 import { useBarcodeScanner } from "../lib/barcode";
+import { useTheme } from "../lib/theme";
 
 type Product = {
   id: string;
@@ -26,6 +27,7 @@ export default function Order({
   tableSessionId: string;
   onPaid?: () => void;
 }) {
+  const { productCardBg } = useTheme();
   const [invoice, setInvoice] = useState<any>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -453,7 +455,7 @@ export default function Order({
             ))}
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button onClick={() => { setShowSplit(false); setSplitLineIds([]); }} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>Cancelar</button>
-              <button onClick={splitBill} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}>Dividir</button>
+              <button onClick={splitBill} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}>Dividir</button>
             </div>
           </div>
         </div>
@@ -483,7 +485,7 @@ export default function Order({
             </label>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button onClick={() => setShowTransfer(false)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>Cancelar</button>
-              <button onClick={transferWaiter} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}>Transferir</button>
+              <button onClick={transferWaiter} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}>Transferir</button>
             </div>
           </div>
         </div>
@@ -494,9 +496,9 @@ export default function Order({
           marginBottom: 16,
           padding: "12px 16px",
           borderRadius: 12,
-          background: "#dcfce7",
-          border: "2px solid #86efac",
-          color: "#166534",
+          background: "var(--t-success-soft)",
+          border: "2px solid var(--t-success-border)",
+          color: "var(--t-success-fg)",
           fontWeight: 600,
           fontSize: 14,
           display: "flex",
@@ -537,8 +539,8 @@ export default function Order({
                 padding: "6px 12px",
                 borderRadius: 8,
                 border: "none",
-                background: "#166534",
-                color: "#fff",
+                background: "var(--t-green-fg)",
+                color: "var(--t-primary-fg)",
                 cursor: markingServed ? "wait" : "pointer",
                 fontSize: 13,
                 fontWeight: 600,
@@ -549,7 +551,7 @@ export default function Order({
             </button>
             <button
               onClick={() => setKitchenReadyAlert(null)}
-              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 18, lineHeight: 1, color: "#166534" }}
+              style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 18, lineHeight: 1, color: "var(--t-success-fg)" }}
             >
               ×
             </button>
@@ -583,7 +585,7 @@ export default function Order({
             <span style={{
               padding: "4px 10px", borderRadius: 8, fontSize: 12, fontWeight: 600,
               background: scanFlash.includes("✓") ? "#dcfce7" : "#fef2f2",
-              color: scanFlash.includes("✓") ? "#166534" : "#b91c1c",
+              color: scanFlash.includes("✓") ? "var(--t-success-fg)" : "var(--t-danger-fg)",
             }}>
               {scanFlash}
             </span>
@@ -591,7 +593,7 @@ export default function Order({
           <span style={{
           padding: "4px 12px", borderRadius: 20, fontSize: 13, fontWeight: 600,
           background: isPaid ? "#dcfce7" : invoice?.status === "sent_to_kitchen" ? "#fef3c7" : "#e0e7ff",
-          color: isPaid ? "#166534" : "#334155",
+          color: isPaid ? "var(--t-success-fg)" : "var(--t-fg)",
         }}>
           {isPaid ? "Pagada" : inKitchen ? "En cocina" : "Borrador"}
         </span>
@@ -608,10 +610,10 @@ export default function Order({
             setSearch("");
           }
         }}
-        style={{ width: "100%", maxWidth: 360, padding: "8px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", marginBottom: 12 }}
+        style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", marginBottom: 12, minHeight: 44, boxSizing: "border-box" }}
       />
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 16 }}>
+      <div className="yall-pos-layout">
         <div>
           {dailyMenu.items.length > 0 && !isPaid && (
             <div style={{
@@ -641,7 +643,7 @@ export default function Order({
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          <div className="yall-chip-row">
             <CatBtn active={!selectedCat} onClick={() => setSelectedCat("")} color="#2563eb">Todos</CatBtn>
             {categories.map((c) => (
               <CatBtn key={c.id} active={selectedCat === c.id} onClick={() => setSelectedCat(c.id)} color={c.color ?? "#64748b"}>
@@ -650,7 +652,7 @@ export default function Order({
             ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: 8 }}>
+          <div className="yall-pos-products">
             {filtered.map((p) => {
               const v = p.variants[0];
               const isDaily = dailyProductIds.has(p.id);
@@ -659,11 +661,13 @@ export default function Order({
                   key={p.id}
                   onClick={() => addProduct(p)}
                   disabled={isPaid}
+                  className="yall-product-btn"
                   style={{
-                    padding: 14, borderRadius: 12, border: "1px solid var(--t-border)", textAlign: "left",
-                    background: p.category?.color ? `${p.category.color}18` : "#fff",
-                    cursor: isPaid ? "not-allowed" : "pointer", opacity: isPaid ? 0.5 : 1,
-                    boxShadow: isDaily ? "inset 0 0 0 2px #f59e0b" : undefined,
+                    background: p.category?.color ? productCardBg(p.category.color) : "var(--t-card)",
+                    color: "var(--t-fg)",
+                    cursor: isPaid ? "not-allowed" : "pointer",
+                    opacity: isPaid ? 0.5 : 1,
+                    boxShadow: isDaily ? "inset 0 0 0 2px var(--t-warn-border)" : undefined,
                   }}
                 >
                   <div style={{ fontWeight: 600, fontSize: 13 }}>
@@ -676,7 +680,8 @@ export default function Order({
           </div>
         </div>
 
-        <div style={{ border: "1px solid var(--t-border)", borderRadius: 14, padding: 16, position: "sticky", top: 80 }}>
+        <div className="yall-pos-ticket">
+        <div className="yall-pos-ticket-inner">
           {openInvoices.length > 1 && (
             <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
               {openInvoices.map((inv, idx) => (
@@ -685,8 +690,8 @@ export default function Order({
                   onClick={() => selectInvoice(inv.id)}
                   style={{
                     padding: "4px 10px", borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer", fontSize: 12,
-                    background: inv.id === activeInvoiceId ? "#2563eb" : "#fff",
-                    color: inv.id === activeInvoiceId ? "#fff" : "#475569",
+                    background: inv.id === activeInvoiceId ? "var(--t-primary)" : "var(--t-card)",
+                    color: inv.id === activeInvoiceId ? "var(--t-primary-fg)" : "var(--t-muted)",
                   }}
                 >
                   Cuenta {idx + 1} · {formatCOP(Number(inv.total))}
@@ -729,7 +734,8 @@ export default function Order({
                         padding: "2px 6px",
                         borderRadius: 6,
                         border: "1px solid var(--t-border-strong)",
-                        background: l.lineNotes ? "#eff6ff" : "#fff",
+                        background: l.lineNotes ? "var(--t-accent-soft)" : "var(--t-card)",
+                        color: "var(--t-fg)",
                         cursor: inKitchen ? "not-allowed" : "pointer",
                         opacity: inKitchen ? 0.6 : 1,
                       }}
@@ -819,6 +825,7 @@ export default function Order({
             </div>
           )}
         </div>
+        </div>
       </div>
     </div>
   );
@@ -838,7 +845,7 @@ function CatBtn({ active, onClick, color, children }: { active: boolean; onClick
   );
 }
 
-const btnPrimary: React.CSSProperties = { padding: 14, borderRadius: 10, border: "none", background: "#16a34a", color: "#fff", fontWeight: 700, cursor: "pointer" };
+const btnPrimary: React.CSSProperties = { padding: 14, borderRadius: 10, border: "none", background: "var(--t-green-fg)", color: "var(--t-primary-fg)", fontWeight: 700, cursor: "pointer" };
 const btnSecondary: React.CSSProperties = { padding: 12, borderRadius: 10, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" };
 
 function qtyBtnStyle(disabled: boolean): React.CSSProperties {

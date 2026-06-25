@@ -60,7 +60,7 @@ export default function AdminOperationsView() {
     kitchenPrinterPort: "9100",
   });
   const [notifications, setNotifications] = useState<Notifications>(defaultNotifications());
-  const [kiosk, setKiosk] = useState({ waiterExitPin: "2025" });
+  const [kiosk, setKiosk] = useState({ adminPin: "", hasAdminPin: false });
   const [agentStatus, setAgentStatus] = useState("");
   const [testing, setTesting] = useState<"cash" | "kitchen" | null>(null);
 
@@ -88,7 +88,7 @@ export default function AdminOperationsView() {
       tableReadySlaWebhookEnabled: n.tableReadySlaWebhookEnabled !== false,
     });
     const k = branchRes.data?.kiosk ?? {};
-    setKiosk({ waiterExitPin: k.waiterExitPin ?? "2025" });
+    setKiosk({ adminPin: "", hasAdminPin: Boolean(k.hasAdminPin) });
     const status = await getPrintAgentStatus();
     setAgentStatus(
       status?.ok
@@ -141,9 +141,14 @@ export default function AdminOperationsView() {
   }
 
   async function saveKiosk() {
+    if (!kiosk.adminPin.trim()) {
+      toast("Ingresa el PIN de administrador (4-6 dígitos)", "err");
+      return;
+    }
     await runAction(async () => {
-      await api.patch("/v1/settings/branch", { kiosk: { waiterExitPin: kiosk.waiterExitPin.trim() || "2025" } });
-    }, "PIN modo mesero guardado");
+      await api.patch("/v1/settings/branch", { kiosk: { adminPin: kiosk.adminPin.trim() } });
+      setKiosk((k) => ({ adminPin: "", hasAdminPin: true }));
+    }, "PIN administrador guardado");
   }
 
   return (
@@ -155,7 +160,7 @@ export default function AdminOperationsView() {
       />
 
       <AdminSection title="Impresoras térmicas" desc={agentStatus}>
-        <div style={adminStyles.grid2}>
+        <div className={adminStyles.grid2}>
           <Field label="IP impresora caja" hint="Tiquetes cliente y reporte X">
             <input style={adminStyles.input} value={printers.cashPrinterIp} onChange={(e) => setPrinters({ ...printers, cashPrinterIp: e.target.value })} />
           </Field>
@@ -176,7 +181,7 @@ export default function AdminOperationsView() {
         <Field label="Webhook URL" hint="Eventos: reservation.*, table.ready_overdue, table.sla_weekly_breach">
           <input style={adminStyles.input} value={notifications.webhookUrl} onChange={(e) => setNotifications({ ...notifications, webhookUrl: e.target.value })} placeholder="https://…" />
         </Field>
-        <div style={adminStyles.grid2}>
+        <div className={adminStyles.grid2}>
           <Field label="Recordatorio reservas (min antes)">
             <input style={adminStyles.input} value={notifications.reservationRemindMinutes} onChange={(e) => setNotifications({ ...notifications, reservationRemindMinutes: e.target.value })} />
           </Field>
@@ -203,9 +208,18 @@ export default function AdminOperationsView() {
       </AdminSection>
 
       <AdminSection title="Modo mesero (quiosco tablet)">
-        <Field label="PIN para salir del modo mesero">
-          <input style={adminStyles.input} value={kiosk.waiterExitPin} onChange={(e) => setKiosk({ waiterExitPin: e.target.value })} />
+        <Field label="PIN de administrador / gerente" hint="Salir del quiosco y cerrar sesión. 4-6 dígitos.">
+          <input
+            style={adminStyles.input}
+            inputMode="numeric"
+            value={kiosk.adminPin}
+            placeholder={kiosk.hasAdminPin ? "•••• configurado" : "2025"}
+            onChange={(e) => setKiosk({ ...kiosk, adminPin: e.target.value.replace(/\D/g, "").slice(0, 6) })}
+          />
         </Field>
+        <p style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 0 }}>
+          Cada mesero o usuario operativo tiene su propio PIN en <strong>Personal</strong> o <strong>Usuarios</strong>.
+        </p>
         <Field label="URL para tablets">
           <input style={adminStyles.input} readOnly value={waiterKioskUrl()} />
         </Field>

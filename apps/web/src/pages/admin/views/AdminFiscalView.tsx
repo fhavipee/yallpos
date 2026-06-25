@@ -215,7 +215,7 @@ function ResolutionForm({
         </Field>
       )}
       <Field label="Prefijo"><input style={adminStyles.input} value={form.prefix} onChange={(e) => setForm({ ...form, prefix: e.target.value })} /></Field>
-      <div style={adminStyles.grid2}>
+      <div className={adminStyles.grid2}>
         <Field label="Desde número"><input type="number" style={adminStyles.input} value={form.fromNumber} onChange={(e) => setForm({ ...form, fromNumber: Number(e.target.value) })} /></Field>
         <Field label="Hasta número"><input type="number" style={adminStyles.input} value={form.toNumber} onChange={(e) => setForm({ ...form, toNumber: Number(e.target.value) })} /></Field>
         <Field label="Vigencia desde"><input type="date" style={adminStyles.input} value={form.validFrom} onChange={(e) => setForm({ ...form, validFrom: e.target.value })} /></Field>

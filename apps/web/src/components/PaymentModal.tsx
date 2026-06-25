@@ -114,7 +114,7 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
               <label style={labelStyle}>
                 Recibido
                 <input value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} type="number" style={inputStyle} />
-                {change >= 0 && <span style={{ color: "#059669" }}>Vuelto: {formatCOP(change)}</span>}
+                {change >= 0 && <span style={{ color: "var(--t-success-fg)" }}>Vuelto: {formatCOP(change)}</span>}
               </label>
             )}
           </>
@@ -152,7 +152,7 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
           </button>
           <button
             onClick={split ? confirmSplit : confirmSingle}
-            style={{ flex: 1, padding: 14, borderRadius: 10, border: "none", background: "#16a34a", color: "#fff", fontWeight: 700, cursor: "pointer" }}
+            style={{ flex: 1, padding: 14, borderRadius: 10, border: "none", background: "var(--t-green-fg)", color: "var(--t-primary-fg)", fontWeight: 700, cursor: "pointer" }}
           >
             Cobrar {formatCOP(totalWithTip)}
           </button>

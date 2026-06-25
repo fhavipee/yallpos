@@ -7,6 +7,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  MaxLength,
   Min,
   MinLength,
 } from "class-validator";
@@ -49,6 +50,8 @@ export class UpsertStaffDto {
   @IsString() name!: string;
   @IsIn(["waiter", "cashier", "kitchen", "manager", "baker"]) role!: string;
   @IsOptional() @IsString() phone?: string;
+  @IsOptional() @IsString() @MinLength(4) @MaxLength(6) pin?: string;
+  @IsOptional() @IsBoolean() clearPin?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
@@ -58,6 +61,8 @@ export class UpsertUserDto {
   @IsOptional() @IsIn(["owner", "manager", "cashier", "waiter", "kitchen", "baker"]) role?: string;
   @IsOptional() @IsString() roleId?: string;
   @IsOptional() @IsString() @MinLength(6) password?: string;
+  @IsOptional() @IsString() @MinLength(4) @MaxLength(6) pin?: string;
+  @IsOptional() @IsBoolean() clearPin?: boolean;
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 

@@ -76,7 +76,7 @@ export default function AdminBranchView() {
             <div style={{ marginBottom: 16, fontSize: 13, color: "var(--t-muted)" }}>
               ID sucursal: <IdChip id={data.branch.id} /> · Empresa: <IdChip id={data.branch.companyId} />
             </div>
-            <div style={adminStyles.grid2}>
+            <div className={adminStyles.grid2}>
               <Field label="Nombre comercial" hint="Aparece en tiquetes, KDS y pantallas de mesero">
                 <input style={adminStyles.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
               </Field>

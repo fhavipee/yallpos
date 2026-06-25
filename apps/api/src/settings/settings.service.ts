@@ -1,10 +1,13 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { UpdateCompanyDto, UpdateBranchSettingsDto, UpdateFiscalResolutionDto } from "./dto/settings.dto";
+import { KioskService } from "../kiosk/kiosk.service";
+import { BadRequestException } from "@nestjs/common";
+import { mergeKioskPinUpdate } from "../common/pin.util";
 
 @Injectable()
 export class SettingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private kiosk: KioskService) {}
 
   async getCompanyByBranch(branchId: string) {
     const branch = await this.prisma.branch.findUnique({
@@ -52,7 +55,8 @@ export class SettingsService {
 
     const settings = (branch.company.tenant.settings ?? {}) as Record<string, unknown>;
     const branches = (settings.branches ?? {}) as Record<string, unknown>;
-    return branches[branchId] ?? {};
+    const branchSettings = (branches[branchId] ?? {}) as Record<string, unknown>;
+    return this.kiosk.sanitizeBranchSettings(branchSettings);
   }
 
   async updateBranchSettings(branchId: string, dto: UpdateBranchSettingsDto) {
@@ -66,11 +70,23 @@ export class SettingsService {
     const branches = { ...((settings.branches ?? {}) as Record<string, unknown>) };
     const current = (branches[branchId] ?? {}) as Record<string, unknown>;
 
+    let kioskPatch: Record<string, unknown> | undefined;
+    if (dto.kiosk?.adminPin?.trim() || dto.kiosk?.waiterExitPin?.trim()) {
+      try {
+        kioskPatch = mergeKioskPinUpdate(
+          current.kiosk as Parameters<typeof mergeKioskPinUpdate>[0],
+          dto.kiosk,
+        ) as Record<string, unknown>;
+      } catch {
+        throw new BadRequestException("PIN de administrador debe ser de 4 a 6 dígitos numéricos");
+      }
+    }
+
     branches[branchId] = {
       ...current,
       ...(dto.printers ? { printers: { ...(current.printers as object ?? {}), ...dto.printers } } : {}),
       ...(dto.notifications ? { notifications: { ...(current.notifications as object ?? {}), ...dto.notifications } } : {}),
-      ...(dto.kiosk ? { kiosk: { ...(current.kiosk as object ?? {}), ...dto.kiosk } } : {}),
+      ...(kioskPatch ? { kiosk: kioskPatch } : {}),
     };
 
     const nextSettings = { ...settings, branches };
@@ -80,6 +96,6 @@ export class SettingsService {
       data: { settings: nextSettings as object },
     });
 
-    return branches[branchId];
+    return branches[branchId] as Record<string, unknown>;
   }
 }

@@ -142,11 +142,11 @@ export default function Onboarding({ onComplete }: { onComplete?: (branchId: str
 
       {step === "done" && result && (
         <div style={{ padding: 20, background: "var(--t-success-soft)", borderRadius: 12, border: "1px solid #86efac" }}>
-          <h3 style={{ margin: "0 0 8px", color: "#166534" }}>✅ {result.message}</h3>
+          <h3 style={{ margin: "0 0 8px", color: "var(--t-success-fg)" }}>✅ {result.message}</h3>
           <p style={{ fontSize: 14 }}>Sucursal configurada y lista para vender.</p>
           <button
             onClick={() => onComplete?.(ctx.branchId)}
-            style={{ padding: "12px 20px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer", marginTop: 12 }}
+            style={{ padding: "12px 20px", borderRadius: 10, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", fontWeight: 600, cursor: "pointer", marginTop: 12 }}
           >
             Ir al mostrador →
           </button>
@@ -168,4 +168,4 @@ function Field({ label, value, onChange, type = "text", placeholder }: {
 }
 
 const inputStyle: React.CSSProperties = { padding: "8px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", fontSize: 14 };
-const btnPrimary: React.CSSProperties = { padding: "12px 20px", borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontWeight: 600, cursor: "pointer", marginTop: 8 };
+const btnPrimary: React.CSSProperties = { padding: "12px 20px", borderRadius: 10, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", fontWeight: 600, cursor: "pointer", marginTop: 8 };

@@ -500,15 +500,15 @@ export default function Tables({
               }));
               setShowReservation(true);
             }}
-            style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", fontSize: 13 }}
+            style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer", fontSize: 13 }}
           >
             + Reserva
           </button>
           <div style={{ display: "flex", gap: 12, fontSize: 14 }}>
-            <span style={{ color: "#16a34a" }}>● {stats.free} libres</span>
-            <span style={{ color: "#dc2626" }}>● {stats.occupied} ocupadas</span>
+            <span style={{ color: "var(--t-green-fg)" }}>● {stats.free} libres</span>
+            <span style={{ color: "var(--t-red-fg)" }}>● {stats.occupied} ocupadas</span>
             {pendingReservations.length > 0 && (
-              <span style={{ color: "#2563eb" }}>📅 {pendingReservations.length} reservas</span>
+              <span style={{ color: "var(--t-link)" }}>📅 {pendingReservations.length} reservas</span>
             )}
           </div>
         </div>
@@ -524,8 +524,8 @@ export default function Tables({
             padding: "12px 16px",
             borderRadius: 12,
             background: "var(--t-warn-soft)",
-            border: "2px solid #f59e0b",
-            color: "#92400e",
+            border: "2px solid var(--t-warn-border)",
+            color: "var(--t-warn-fg)",
             fontSize: 14,
             display: "flex",
             justifyContent: "space-between",
@@ -557,9 +557,9 @@ export default function Tables({
           marginBottom: 16,
           padding: "12px 16px",
           borderRadius: 12,
-          background: "#dcfce7",
-          border: "2px solid #86efac",
-          color: "#166534",
+          background: "var(--t-success-soft)",
+          border: "2px solid var(--t-success-border)",
+          color: "var(--t-success-fg)",
           fontWeight: 600,
           fontSize: 14,
           display: "flex",
@@ -620,7 +620,7 @@ export default function Tables({
           padding: 14,
           marginBottom: 20,
         }}>
-          <h4 style={{ margin: "0 0 10px", fontSize: 14, color: "#166534" }}>
+          <h4 style={{ margin: "0 0 10px", fontSize: 14, color: "var(--t-success-fg)" }}>
             Mesas listas — pendientes de servir ({readyQueue.length})
           </h4>
           <div style={{ display: "grid", gap: 8, maxHeight: 220, overflowY: "auto" }}>
@@ -649,14 +649,14 @@ export default function Tables({
                     {(row.waitingMinutes ?? 0) > 0 && (
                       <>
                         {" · "}
-                        <span style={{ color: row.isOverdue ? "#b91c1c" : "#166534", fontWeight: 600 }}>
+                        <span style={{ color: row.isOverdue ? "var(--t-danger-fg)" : "var(--t-success-fg)", fontWeight: 600 }}>
                           {row.waitingMinutes} min
                         </span>
                       </>
                     )}
                   </div>
                 </div>
-                <strong style={{ color: "#166534" }}>{formatCOP(Number(row.total))}</strong>
+                <strong style={{ color: "var(--t-success-fg)" }}>{formatCOP(Number(row.total))}</strong>
                 <button onClick={() => onOpenOrder(row.tableSessionId)} style={btnSmallPrimary}>Abrir</button>
                 {row.hostWhatsAppLink && (
                   <a
@@ -790,10 +790,10 @@ export default function Tables({
                     {row.readyPending ? " · 🟢 Lista" : row.inKitchen ? " · En cocina" : ""}
                   </div>
                 </div>
-                <strong style={{ color: row.total > 0 ? "#b91c1c" : "#64748b" }}>
+                <strong style={{ color: row.total > 0 ? "var(--t-danger-fg)" : "var(--t-muted)" }}>
                   {formatCOP(row.total)}
                 </strong>
-                <span style={{ fontSize: 11, color: "#2563eb" }}>Abrir →</span>
+                <span style={{ fontSize: 11, color: "var(--t-link)" }}>Abrir →</span>
               </button>
             ))}
           </div>
@@ -803,7 +803,7 @@ export default function Tables({
       {Object.entries(grouped).map(([areaName, list]) => (
         <div key={areaName} style={{ marginBottom: 24 }}>
           <h4 style={{ margin: "0 0 10px", color: "var(--t-muted)" }}>{areaName}</h4>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 10 }}>
+          <div className="yall-tables-grid">
             {list.map((t) => {
               const open = t.sessions?.[0];
               const invoice = open?.invoices?.[0];
@@ -812,19 +812,21 @@ export default function Tables({
               const isFlashing = flashTable?.tableId === t.id;
               const flashStyle = isFlashing
                 ? flashTable?.status === "closed"
-                  ? { boxShadow: "0 0 0 3px #86efac", transform: "scale(1.02)" }
+                  ? { boxShadow: "0 0 0 3px var(--t-success-border)", transform: "scale(1.02)" }
                   : flashTable?.status === "opened"
-                    ? { boxShadow: "0 0 0 3px #fca5a5", transform: "scale(1.02)" }
-                    : { boxShadow: "0 0 0 3px #93c5fd", transform: "scale(1.02)" }
+                    ? { boxShadow: "0 0 0 3px var(--t-danger-border)", transform: "scale(1.02)" }
+                    : { boxShadow: "0 0 0 3px var(--t-accent-border)", transform: "scale(1.02)" }
                 : {};
               return (
                 <button
                   key={t.id}
                   onClick={() => handleTableClick(t)}
+                  className="yall-touch-btn"
                   style={{
                     padding: "14px 10px", borderRadius: 14, border: "2px solid",
-                    borderColor: readyPending ? "#22c55e" : open ? "#fca5a5" : "#86efac",
-                    background: readyPending ? "#ecfdf5" : open ? "#fef2f2" : "#f0fdf4",
+                    borderColor: readyPending ? "var(--t-success-border)" : open ? "var(--t-danger-border)" : "var(--t-success-border)",
+                    background: readyPending ? "var(--t-success-soft)" : open ? "var(--t-danger-soft)" : "var(--t-success-soft)",
+                    color: "var(--t-fg)",
                     cursor: "pointer", textAlign: "center", position: "relative",
                     transition: "box-shadow 0.2s ease, transform 0.2s ease",
                     ...flashStyle,
@@ -834,7 +836,7 @@ export default function Tables({
                     <span style={{
                       position: "absolute", top: 6, right: 6,
                       width: 10, height: 10, borderRadius: "50%",
-                      background: "#22c55e", boxShadow: "0 0 0 2px #fff",
+                      background: "var(--t-green-fg)", boxShadow: "0 0 0 2px var(--t-card)",
                     }} title="Lista en cocina" />
                   )}
                   {open && open.canClose && (
@@ -846,7 +848,7 @@ export default function Tables({
                       style={{
                         position: "absolute", top: 6, left: 6, fontSize: 10,
                         padding: "2px 6px", borderRadius: 6, background: "var(--t-card)",
-                        border: "1px solid #bbf7d0", color: "#15803d",
+                        border: "1px solid var(--t-success-border)", color: "var(--t-success-fg)",
                         opacity: closingSessionId === open.id ? 0.6 : 1,
                       }}
                     >
@@ -878,12 +880,12 @@ export default function Tables({
                         {open.guestsCount ?? "?"} com · {waiterName(open.waiterId)}
                       </div>
                       {total > 0 && (
-                        <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: "#b91c1c" }}>
+                        <div style={{ fontSize: 12, fontWeight: 700, marginTop: 4, color: "var(--t-danger-fg)" }}>
                           {formatCOP(total)}
                         </div>
                       )}
                       {invoice?.status === "sent_to_kitchen" && (
-                        <div style={{ fontSize: 10, marginTop: 2, color: "#d97706" }}>En cocina</div>
+                        <div style={{ fontSize: 10, marginTop: 2, color: "var(--t-orange-fg)" }}>En cocina</div>
                       )}
                     </>
                   )}
@@ -914,7 +916,7 @@ export default function Tables({
             </label>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button onClick={() => setTransferring(null)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>Cancelar</button>
-              <button onClick={confirmTransfer} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}>Transferir</button>
+              <button onClick={confirmTransfer} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}>Transferir</button>
             </div>
           </div>
         </div>
@@ -985,7 +987,7 @@ export default function Tables({
 
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
               <button onClick={() => setShowReservation(false)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>Cancelar</button>
-              <button onClick={createReservation} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}>Guardar</button>
+              <button onClick={createReservation} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}>Guardar</button>
             </div>
           </div>
         </div>
@@ -1010,7 +1012,7 @@ export default function Tables({
             </label>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button onClick={() => setOpening(null)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>Cancelar</button>
-              <button onClick={() => openSession(opening)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}>Abrir</button>
+              <button onClick={() => openSession(opening)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}>Abrir</button>
             </div>
           </div>
         </div>
@@ -1020,9 +1022,9 @@ export default function Tables({
 }
 
 const labelStyle: React.CSSProperties = { display: "grid", gap: 6, fontSize: 14, marginBottom: 10 };
-const inputStyle: React.CSSProperties = { padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)" };
-const btnSmallPrimary: React.CSSProperties = { padding: "6px 12px", borderRadius: 6, border: "none", background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: 13 };
-const btnSmallGhost: React.CSSProperties = { padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 13 };
+const inputStyle: React.CSSProperties = { padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-input-bg)", color: "var(--t-input-fg)" };
+const btnSmallPrimary: React.CSSProperties = { padding: "6px 12px", borderRadius: 6, border: "none", background: "var(--t-green-fg)", color: "var(--t-primary-fg)", cursor: "pointer", fontSize: 13 };
+const btnSmallGhost: React.CSSProperties = { padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", color: "var(--t-fg)", cursor: "pointer", fontSize: 13 };
 
 function waBtnStyle(background: string): React.CSSProperties {
   return {
@@ -1042,10 +1044,10 @@ function waBtnStyle(background: string): React.CSSProperties {
 function WhatsAppMessagePreview({ message }: { message: string }) {
   return (
     <div style={{
-      background: "#e5ddd5",
+      background: "var(--t-wa-bg)",
       borderRadius: 12,
       padding: 12,
-      border: "1px solid #d1c7bc",
+      border: "1px solid var(--t-wa-border)",
     }}>
       <div style={{
         background: "var(--t-card)",
@@ -1053,7 +1055,7 @@ function WhatsAppMessagePreview({ message }: { message: string }) {
         padding: "10px 12px",
         fontSize: 13,
         lineHeight: 1.45,
-        color: "#111827",
+        color: "var(--t-wa-bubble-fg)",
         boxShadow: "0 1px 1px rgba(0,0,0,0.08)",
         maxWidth: "100%",
       }}>
@@ -1063,7 +1065,7 @@ function WhatsAppMessagePreview({ message }: { message: string }) {
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 10, color: "#667781", marginTop: 6, textAlign: "right" }}>
+      <div style={{ fontSize: 10, color: "var(--t-wa-meta)", marginTop: 6, textAlign: "right" }}>
         Vista previa · formato WhatsApp
       </div>
     </div>

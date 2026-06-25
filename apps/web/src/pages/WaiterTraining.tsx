@@ -179,8 +179,8 @@ export default function WaiterTraining({
               key={step.id}
               style={{
                 borderRadius: 12,
-                border: `1px solid ${step.done ? "#bbf7d0" : "#e2e8f0"}`,
-                background: step.done ? "#f0fdf4" : "#fff",
+                border: `1px solid ${step.done ? "var(--t-success-border)" : "var(--t-border)"}`,
+                background: step.done ? "var(--t-success-soft)" : "var(--t-card)",
                 overflow: "hidden",
               }}
             >
@@ -203,8 +203,8 @@ export default function WaiterTraining({
                   width: 28,
                   height: 28,
                   borderRadius: "50%",
-                  background: step.done ? "#16a34a" : "#e2e8f0",
-                  color: step.done ? "#fff" : "#64748b",
+                  background: step.done ? "var(--t-green-fg)" : "var(--t-chip-bg)",
+                  color: step.done ? "var(--t-primary-fg)" : "var(--t-muted)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",

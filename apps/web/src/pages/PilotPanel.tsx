@@ -246,8 +246,8 @@ export default function PilotPanel({ companyId, branchId, onSelectBranch, onOpen
       {pilot && (
         <div style={{
           padding: 20, borderRadius: 12, marginBottom: 20,
-          background: pilot.readyForPilot ? "#f0fdf4" : "#fffbeb",
-          border: `1px solid ${pilot.readyForPilot ? "#86efac" : "#fcd34d"}`,
+          background: pilot.readyForPilot ? "var(--t-success-soft)" : "var(--t-warn-soft)",
+          border: `1px solid ${pilot.readyForPilot ? "var(--t-success-border)" : "var(--t-warn-border)"}`,
         }}>
           <h3 style={{ margin: "0 0 12px" }}>
             {pilot.readyForPilot ? "✅ Listo para piloto" : "⏳ En preparación"}
@@ -268,7 +268,7 @@ export default function PilotPanel({ companyId, branchId, onSelectBranch, onOpen
         <div style={{
           padding: 20, borderRadius: 12, marginBottom: 20,
           background: "var(--t-accent-soft)",
-          border: "1px solid #bfdbfe",
+          border: "1px solid var(--t-accent-border)",
         }}>
           <h3 style={{ margin: "0 0 12px" }}>Operación hoy — servicio en mesa</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 12 }}>
@@ -285,7 +285,7 @@ export default function PilotPanel({ companyId, branchId, onSelectBranch, onOpen
               {opsSummary.slaByWaiter.map((w: any) => (
                 <div key={w.waiterId ?? w.waiterName} style={{
                   display: "flex", justifyContent: "space-between", marginTop: 6,
-                  color: w.breached ? "#b91c1c" : "#166534",
+                  color: w.breached ? "var(--t-danger-fg)" : "var(--t-success-fg)",
                 }}>
                   <span>{w.waiterName}</span>
                   <span>{w.compliancePct}% · {w.avgWaitMinutes} min prom.</span>
@@ -305,8 +305,8 @@ export default function PilotPanel({ companyId, branchId, onSelectBranch, onOpen
             <>
               <div style={{
                 padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13,
-                background: checklist.ready ? "#f0fdf4" : "#fffbeb",
-                border: `1px solid ${checklist.ready ? "#86efac" : "#fcd34d"}`,
+                background: checklist.ready ? "var(--t-success-soft)" : "var(--t-warn-soft)",
+                border: `1px solid ${checklist.ready ? "var(--t-success-border)" : "var(--t-warn-border)"}`,
               }}>
                 {checklist.ready
                   ? "✅ Requisitos bloqueantes cumplidos — puede pasar a FISCAL_ENV=habilitacion"
@@ -353,8 +353,8 @@ export default function PilotPanel({ companyId, branchId, onSelectBranch, onOpen
         <Section title="Certificado DIAN">
           <div style={{
             padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13,
-            background: fiscal?.loaded ? "#f0fdf4" : "#fffbeb",
-            border: `1px solid ${fiscal?.loaded ? "#86efac" : "#fcd34d"}`,
+            background: fiscal?.loaded ? "var(--t-success-soft)" : "var(--t-warn-soft)",
+            border: `1px solid ${fiscal?.loaded ? "var(--t-success-border)" : "var(--t-warn-border)"}`,
           }}>
             {fiscal?.loaded
               ? "✅ Certificado cargado — listo para habilitación"
@@ -389,8 +389,8 @@ export default function PilotPanel({ companyId, branchId, onSelectBranch, onOpen
         <Section title="Impresión">
           <div style={{
             padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13,
-            background: printAgent?.ok ? "#f0fdf4" : "#fffbeb",
-            border: `1px solid ${printAgent?.ok ? "#86efac" : "#fcd34d"}`,
+            background: printAgent?.ok ? "var(--t-success-soft)" : "var(--t-warn-soft)",
+            border: `1px solid ${printAgent?.ok ? "var(--t-success-border)" : "var(--t-warn-border)"}`,
           }}>
             {printAgent?.ok
               ? printAgent.dual
@@ -528,7 +528,7 @@ node apps/print-agent/index.js`}
                   <strong>Última simulación</strong>
                   <div style={{ marginTop: 8, display: "grid", gap: 4 }}>
                     {simulationResult.steps.map((s: any, i: number) => (
-                      <div key={i} style={{ color: s.ok ? "#166534" : "#b91c1c" }}>
+                      <div key={i} style={{ color: s.ok ? "var(--t-success-fg)" : "var(--t-danger-fg)" }}>
                         {s.ok ? "✅" : "❌"} {s.step}
                         {s.detail ? <span style={{ color: "var(--t-muted)" }}> — {s.detail}</span> : null}
                       </div>
@@ -539,8 +539,8 @@ node apps/print-agent/index.js`}
 
               <div style={{
                 padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13,
-                background: opsChecklist.ready ? "#f0fdf4" : "#fffbeb",
-                border: `1px solid ${opsChecklist.ready ? "#86efac" : "#fcd34d"}`,
+                background: opsChecklist.ready ? "var(--t-success-soft)" : "var(--t-warn-soft)",
+                border: `1px solid ${opsChecklist.ready ? "var(--t-success-border)" : "var(--t-warn-border)"}`,
               }}>
                 {opsChecklist.ready
                   ? "✅ Listo para operar con clientes reales (sin DIAN)"
@@ -667,13 +667,13 @@ function OpsKpi({ label, value, warn }: { label: string; value: string; warn?: b
       background: "var(--t-card)",
       borderRadius: 8,
       padding: "10px 12px",
-      border: `1px solid ${warn ? "#fca5a5" : "#dbeafe"}`,
+      border: `1px solid ${warn ? "var(--t-danger-border)" : "var(--t-accent-border)"}`,
     }}>
       <div style={{ fontSize: 11, color: "var(--t-muted)" }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 700, color: warn ? "#b91c1c" : "#1e293b" }}>{value}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: warn ? "var(--t-danger-fg)" : "var(--t-fg)" }}>{value}</div>
     </div>
   );
 }
 
-const btnBlue: React.CSSProperties = { padding: "8px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" };
+const btnBlue: React.CSSProperties = { padding: "8px 14px", borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" };
 const btnGray: React.CSSProperties = { padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" };

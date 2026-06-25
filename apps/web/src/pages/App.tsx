@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, clearBranchId, setAuthToken, setBranchId } from "../lib/api";
 import { createBranchSocket, dispatchTableUpdated, dispatchTableReady, dispatchTableServed, type TableUpdatedDetail, type TableReadyDetail, type TableServedDetail } from "../lib/kdsSocket";
 import { clearAuth, getStoredAuth, refreshStoredUser, saveAuth, type AuthUser } from "../lib/auth";
@@ -11,21 +11,29 @@ import PickupBoard from "./PickupBoard";
 import Onboarding from "./Onboarding";
 import Dashboard from "./Dashboard";
 import PilotPanel from "./PilotPanel";
-
-type Branch = { id: string; name: string; companyId: string; type: string };
-type Company = { id: string; name: string; branches: Branch[] };
-
 import SettingsPage from "./Settings";
 import MenuPage from "./Menu";
 import HostBoard from "./HostBoard";
 import WaiterTraining from "./WaiterTraining";
 import WaiterKioskShell from "./WaiterKioskShell";
 import AdminConfig from "./AdminConfig";
+import MobileBottomNav, {
+  APP_TAB_LABELS,
+  buildBottomNavItems,
+  buildMoreMenuItems,
+  type AppTab,
+} from "../components/MobileBottomNav";
+import MobileMoreSheet from "../components/MobileMoreSheet";
+import PwaInstallBanner from "../components/PwaInstallBanner";
 import { ensureWaiterKioskUrl, isWaiterUser, shouldUseWaiterKiosk } from "../lib/waiterKiosk";
 import { canAccessAdmin, canViewCash, canViewDashboard, canViewFloor, canViewKds, canViewSettings } from "../lib/auth";
 import { useTheme } from "../lib/theme";
+import { useIsTablet } from "../lib/useMediaQuery";
+import { useSwipeTabs } from "../lib/useSwipeTabs";
 
-type Tab = "counter" | "pickup-board" | "tables" | "order" | "host" | "kds" | "menu" | "dashboard" | "pilot" | "training" | "settings" | "admin" | "onboarding";
+type Branch = { id: string; name: string; companyId: string; type: string };
+type Company = { id: string; name: string; branches: Branch[] };
+type Tab = AppTab;
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(() => getStoredAuth()?.user ?? null);
@@ -34,7 +42,9 @@ export default function App() {
   const [branchReady, setBranchReady] = useState(false);
   const [tableSessionId, setTableSessionId] = useState(localStorage.getItem("tableSessionId") || "");
   const [tab, setTab] = useState<Tab>("counter");
+  const [moreOpen, setMoreOpen] = useState(false);
   const { dark, toggleDark } = useTheme();
+  const isTablet = useIsTablet();
   const standaloneView = new URLSearchParams(window.location.search).get("view");
 
   function loadCompanies() {
@@ -144,9 +154,35 @@ export default function App() {
   const currentCompany = companies.find((c) => c.branches.some((b) => b.id === branchId));
   const isRestaurant = currentBranch?.type === "restaurant";
 
+  const restaurantSwipeTabs = useMemo(() => ["tables", "order"] as const, []);
+  const swipeEnabled = Boolean(
+    branchId && isRestaurant && canViewFloor(user) && (tab === "tables" || tab === "order"),
+  );
+  const swipeRef = useSwipeTabs(
+    restaurantSwipeTabs,
+    tab === "order" ? "order" : "tables",
+    (next) => {
+      if (next === "order" && !tableSessionId) {
+        alert("Primero abre una mesa");
+        return;
+      }
+      setTab(next);
+    },
+    { enabled: swipeEnabled },
+  );
+
+  const bottomNavItems = useMemo(
+    () => (user ? buildBottomNavItems(user, isRestaurant, !!tableSessionId) : []),
+    [user, isRestaurant, tableSessionId],
+  );
+
+  const moreItems = useMemo(
+    () => (user ? buildMoreMenuItems(user, isRestaurant, bottomNavItems.map((i) => i.id)) : []),
+    [user, isRestaurant, bottomNavItems],
+  );
+
   const bg = "var(--t-bg)";
   const fg = "var(--t-fg)";
-  const card = "var(--t-card)";
 
   if (branchId && standaloneView === "pickup-board") {
     return <PickupBoard branchId={branchId} />;
@@ -185,16 +221,21 @@ export default function App() {
   }
 
   return (
-    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: bg, color: fg, minHeight: "100vh" }}>
-      <header style={{
-        display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", flexWrap: "wrap",
-        background: card, borderBottom: "1px solid var(--t-border)",
-        position: "sticky", top: 0, zIndex: 10,
-      }}>
-        <div style={{ fontWeight: 800, fontSize: 18, color: "#2563eb" }}>YallPos</div>
+    <div className={`yall-app-shell${isTablet ? " yall-app-shell--mobile-nav" : ""}`} style={{ fontFamily: "'Inter', system-ui, sans-serif", background: bg, color: fg, minHeight: "100vh" }}>
+      <header className={`yall-app-header${isTablet ? " yall-app-header--compact" : ""}`}>
+        <div className="yall-app-header-start">
+          <div className="yall-app-brand">YallPos</div>
+          {isTablet && (
+            <span className="yall-app-mobile-tab" aria-current="page">
+              {APP_TAB_LABELS[tab]}
+            </span>
+          )}
+        </div>
 
         <select
+          className="yall-app-branch"
           value={branchId}
+          aria-label="Sucursal"
           onChange={(e) => {
             const id = e.target.value;
             setBranchIdState(id);
@@ -208,11 +249,6 @@ export default function App() {
             const b = branches.find((x) => x.id === id);
             setTab(b?.type === "restaurant" ? "tables" : "counter");
           }}
-          style={{
-            padding: "6px 10px", borderRadius: 8, maxWidth: 220,
-            border: "1px solid var(--t-border-strong)",
-            background: "var(--t-select-bg)", color: "var(--t-select-fg)",
-          }}
         >
           <option value="">Sucursal…</option>
           {branches.map((b) => (
@@ -220,7 +256,7 @@ export default function App() {
           ))}
         </select>
 
-        <nav style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+        <nav className="yall-app-nav yall-hide-mobile">
           {(canViewCash(user) || canViewFloor(user)) && (
             <>
               <NavBtn active={tab === "counter"} onClick={() => setTab("counter")} dark={dark}>Mostrador</NavBtn>
@@ -256,14 +292,18 @@ export default function App() {
           <NavBtn active={tab === "onboarding"} onClick={() => setTab("onboarding")} dark={dark}>+ Negocio</NavBtn>
         </nav>
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 13, color: "var(--t-muted)" }}>{user.name}</span>
-          <button onClick={toggleDark} style={{ ...iconBtn, borderColor: "var(--t-border-strong)", color: "var(--t-fg)" }}>{dark ? "☀️" : "🌙"}</button>
-          <button onClick={logout} style={{ ...iconBtn, borderColor: "var(--t-border-strong)", color: "var(--t-fg)" }} title="Salir">⎋</button>
+        <div className="yall-app-actions">
+          <span className="yall-hide-mobile" style={{ fontSize: 13, color: "var(--t-muted)" }}>{user.name}</span>
+          <button onClick={toggleDark} className="yall-touch-btn" style={{ ...iconBtn, borderColor: "var(--t-border-strong)", color: "var(--t-fg)" }}>{dark ? "☀️" : "🌙"}</button>
+          <button onClick={logout} className="yall-touch-btn" style={{ ...iconBtn, borderColor: "var(--t-border-strong)", color: "var(--t-fg)" }} title="Salir">⎋</button>
         </div>
       </header>
 
-      <main style={{ padding: 20, maxWidth: 1200, margin: "0 auto" }}>
+      <main ref={swipeRef} className={`yall-app-main${swipeEnabled ? " yall-app-main--swipe" : ""}`}>
+        <PwaInstallBanner />
+        {swipeEnabled && (
+          <p className="yall-swipe-hint yall-hide-desktop">Desliza ← → entre Mesas y Comanda</p>
+        )}
         {!branchId && tab !== "onboarding" && (
           <div style={{ textAlign: "center", padding: 40, color: "var(--t-muted)" }}>
             Selecciona una sucursal o crea un negocio nuevo en <strong>+ Negocio</strong>
@@ -323,6 +363,26 @@ export default function App() {
         )}
         {tab === "onboarding" && <Onboarding onComplete={handleOnboardingComplete} />}
       </main>
+
+      {isTablet && user && (
+        <>
+          <MobileBottomNav
+            tab={tab}
+            setTab={setTab}
+            user={user}
+            isRestaurant={isRestaurant}
+            hasTableSession={!!tableSessionId}
+            onMore={() => setMoreOpen(true)}
+          />
+          <MobileMoreSheet
+            open={moreOpen}
+            onClose={() => setMoreOpen(false)}
+            items={moreItems}
+            onSelect={setTab}
+            userName={user.name}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -331,10 +391,11 @@ function NavBtn({ active, onClick, dark, children }: { active: boolean; onClick:
   return (
     <button
       onClick={onClick}
+      className="yall-touch-btn"
       style={{
         padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13,
-        background: active ? "#2563eb" : "transparent",
-        color: active ? "#fff" : "var(--t-muted)",
+        background: active ? "var(--t-primary)" : "transparent",
+        color: active ? "var(--t-primary-fg)" : "var(--t-muted)",
         fontWeight: active ? 600 : 400,
       }}
     >

@@ -121,7 +121,7 @@ function ChecklistRow({
         justifyContent: "space-between",
         padding: "10px 0",
         borderBottom: "1px solid var(--t-border)",
-        color: item.ok ? "#166534" : item.blocking ? "#b45309" : "#64748b",
+        color: item.ok ? "var(--t-success-fg)" : item.blocking ? "var(--t-warn-fg)" : "var(--t-muted)",
       }}
     >
       <span>

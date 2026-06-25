@@ -22,9 +22,9 @@ function AdminShell() {
   }
 
   return (
-    <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+    <div className="yall-admin-shell">
       <AdminSidebar />
-      <div style={{ flex: 1, minWidth: 0, ...adminStyles.page }}>
+      <div className="yall-admin-content">
         <AdminToast msg={toastMsg} type={toastType} />
         <View />
       </div>

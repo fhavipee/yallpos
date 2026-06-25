@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
-import { api, setBranchId } from "../lib/api";
+import { setBranchId } from "../lib/api";
 import { type AuthUser } from "../lib/auth";
-import { DEFAULT_WAITER_EXIT_PIN, exitWaiterKiosk, isWaiterUser } from "../lib/waiterKiosk";
+import { exitWaiterKiosk, isWaiterUser } from "../lib/waiterKiosk";
+import { useSwipeTabs } from "../lib/useSwipeTabs";
+import { verifyPin } from "../lib/pin";
+import { clearActiveWaiter, getActiveWaiter, setActiveWaiter } from "../lib/activeWaiter";
+import PinPromptModal from "../components/PinPromptModal";
 import Tables from "./Tables";
 import Order from "./Order";
 
 type Tab = "tables" | "order";
+type PinAction = "exit" | "logout" | "identify" | null;
 
 export default function WaiterKioskShell({
   branchId,
@@ -24,16 +29,13 @@ export default function WaiterKioskShell({
   const [tableSessionId, setTableSessionId] = useState(
     localStorage.getItem("tableSessionId") || "",
   );
-  const [exitPin, setExitPin] = useState(DEFAULT_WAITER_EXIT_PIN);
+  const [activeWaiter, setActiveWaiterState] = useState(() => getActiveWaiter());
+  const [pinAction, setPinAction] = useState<PinAction>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
 
   useEffect(() => {
     setBranchId(branchId);
-    api.get("/v1/settings/branch")
-      .then((r) => {
-        const pin = r.data?.kiosk?.waiterExitPin;
-        if (typeof pin === "string" && pin.trim()) setExitPin(pin.trim());
-      })
-      .catch(() => {});
   }, [branchId]);
 
   function openOrder(sessionId: string) {
@@ -48,25 +50,53 @@ export default function WaiterKioskShell({
     setTab("tables");
   }
 
-  function tryExitKiosk() {
-    const entered = window.prompt("PIN de gerente para salir del modo mesero:");
-    if (entered === null) return;
-    if (entered.trim() === exitPin) {
-      exitWaiterKiosk();
-      return;
+  async function submitPin(pin: string) {
+    setPinBusy(true);
+    setPinError(null);
+    try {
+      if (pinAction === "identify") {
+        const identity = await verifyPin(pin, "waiter");
+        if (!identity) {
+          setPinError("PIN de mesero incorrecto");
+          return;
+        }
+        setActiveWaiter(identity);
+        setActiveWaiterState(identity);
+        setPinAction(null);
+        return;
+      }
+
+      await verifyPin(pin, "admin");
+      if (pinAction === "exit") {
+        clearActiveWaiter();
+        exitWaiterKiosk();
+      } else if (pinAction === "logout") {
+        clearActiveWaiter();
+        onLogout();
+      }
+      setPinAction(null);
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setPinError(typeof msg === "string" ? msg : "PIN incorrecto");
+    } finally {
+      setPinBusy(false);
     }
-    alert("PIN incorrecto");
   }
 
-  function tryLogout() {
-    const entered = window.prompt("PIN de gerente para cerrar sesión:");
-    if (entered === null) return;
-    if (entered.trim() === exitPin) {
-      onLogout();
-      return;
-    }
-    alert("PIN incorrecto");
-  }
+  const swipeRef = useSwipeTabs(
+    ["tables", "order"] as const,
+    tab,
+    (next) => {
+      if (next === "order" && !tableSessionId) {
+        alert("Primero abre una mesa");
+        return;
+      }
+      setTab(next);
+    },
+    { enabled: true },
+  );
+
+  const waiterLabel = activeWaiter?.name ?? user.name;
 
   return (
     <div style={{
@@ -90,39 +120,59 @@ export default function WaiterKioskShell({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 800, fontSize: 18 }}>YallPos · Mesero</div>
           <div style={{ fontSize: 12, opacity: 0.85, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {branchName ?? "Restaurante"} · {user.name}
+            {branchName ?? "Restaurante"} · {waiterLabel}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => { setPinError(null); setPinAction("identify"); }}
+          className="yall-touch-btn"
+          style={headerBtn}
+          title="Identificar mesero con PIN"
+        >
+          Cambiar
+        </button>
         {!isWaiterUser(user) && (
           <button
             type="button"
-            onClick={tryExitKiosk}
+            onClick={() => { setPinError(null); setPinAction("exit"); }}
+            className="yall-touch-btn"
             style={headerBtn}
             title="Salir del modo mesero"
           >
             Modo completo
           </button>
         )}
-        <button type="button" onClick={tryLogout} style={headerBtn} title="Cerrar sesión">
+        <button
+          type="button"
+          onClick={() => { setPinError(null); setPinAction("logout"); }}
+          className="yall-touch-btn"
+          style={headerBtn}
+          title="Cerrar sesión"
+        >
           Salir
         </button>
       </header>
 
-      <main style={{ flex: 1, padding: "12px 12px 88px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      {!activeWaiter && (
+        <div className="yall-kiosk-identify">
+          <span>Identifícate con tu PIN de mesero para registrar propinas y comandas.</span>
+          <button type="button" onClick={() => setPinAction("identify")}>Ingresar PIN</button>
+        </div>
+      )}
+
+      <main
+        ref={swipeRef}
+        className="yall-app-main--swipe"
+        style={{ flex: 1, padding: "12px 12px 88px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}
+      >
+        <p className="yall-swipe-hint yall-hide-desktop">Desliza ← → entre Mesas y Comanda</p>
         {tab === "tables" && (
-          <Tables
-            branchId={branchId}
-            active
-            onOpenOrder={openOrder}
-          />
+          <Tables branchId={branchId} active onOpenOrder={openOrder} />
         )}
         {tab === "order" && (
           tableSessionId ? (
-            <Order
-              branchId={branchId}
-              tableSessionId={tableSessionId}
-              onPaid={closeOrder}
-            />
+            <Order branchId={branchId} tableSessionId={tableSessionId} onPaid={closeOrder} />
           ) : (
             <div style={{
               textAlign: "center",
@@ -143,25 +193,8 @@ export default function WaiterKioskShell({
         )}
       </main>
 
-      <nav style={{
-        position: "fixed",
-        left: 0,
-        right: 0,
-        bottom: 0,
-        display: "grid",
-        gridTemplateColumns: "1fr 1fr",
-        gap: 8,
-        padding: "10px 12px calc(10px + env(safe-area-inset-bottom))",
-        background: "var(--t-card)",
-        borderTop: "1px solid var(--t-border)",
-        boxShadow: "0 -4px 20px rgba(0,0,0,0.06)",
-      }}>
-        <KioskTab
-          active={tab === "tables"}
-          onClick={() => setTab("tables")}
-          icon="🪑"
-          label="Mesas"
-        />
+      <nav className="yall-app-bottom-nav yall-app-bottom-nav--kiosk" aria-label="Mesero">
+        <KioskTab active={tab === "tables"} onClick={() => setTab("tables")} icon="🪑" label="Mesas" />
         <KioskTab
           active={tab === "order"}
           onClick={() => {
@@ -177,6 +210,25 @@ export default function WaiterKioskShell({
           dimmed={!tableSessionId}
         />
       </nav>
+
+      <PinPromptModal
+        open={pinAction !== null}
+        title={
+          pinAction === "identify"
+            ? "PIN de mesero"
+            : "PIN de administrador"
+        }
+        description={
+          pinAction === "identify"
+            ? "Ingresa tu PIN personal asignado en Admin."
+            : "Solo gerencia puede salir del modo mesero o cerrar la sesión del quiosco."
+        }
+        confirmLabel={pinAction === "identify" ? "Identificarme" : "Confirmar"}
+        onCancel={() => { setPinAction(null); setPinError(null); }}
+        onSubmit={submitPin}
+        error={pinError}
+        busy={pinBusy}
+      />
     </div>
   );
 }
@@ -197,24 +249,11 @@ function KioskTab({
   return (
     <button
       type="button"
+      className={`yall-bottom-tab${active ? " yall-bottom-tab--active" : ""}${dimmed ? " yall-bottom-tab--dimmed" : ""}`}
       onClick={onClick}
-      style={{
-        padding: "14px 12px",
-        borderRadius: 14,
-        border: active ? "2px solid #2563eb" : "2px solid transparent",
-        background: active ? "#eff6ff" : dimmed ? "#f8fafc" : "#f1f5f9",
-        color: active ? "#1d4ed8" : dimmed ? "#94a3b8" : "#334155",
-        cursor: "pointer",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        gap: 4,
-        fontWeight: active ? 700 : 600,
-        fontSize: 15,
-      }}
     >
-      <span style={{ fontSize: 24 }}>{icon}</span>
-      {label}
+      <span className="yall-bottom-tab__icon">{icon}</span>
+      <span className="yall-bottom-tab__label">{label}</span>
     </button>
   );
 }

@@ -201,8 +201,8 @@ export default function HostBoard({
           padding: "12px 16px",
           borderRadius: 12,
           background: "var(--t-danger-soft)",
-          border: "2px solid #fca5a5",
-          color: "#991b1b",
+          border: "2px solid var(--t-danger-border)",
+          color: "var(--t-danger-fg)",
           fontSize: 14,
           fontWeight: 600,
         }}>
@@ -217,8 +217,8 @@ export default function HostBoard({
 
       {data.pendingCount === 0 ? (
         <div style={{
-          background: "var(--t-success-soft)", border: "1px solid #bbf7d0", borderRadius: 12,
-          padding: 20, marginBottom: 24, textAlign: "center", color: "#166534",
+          background: "var(--t-success-soft)", border: "1px solid var(--t-success-border)", borderRadius: 12,
+          padding: 20, marginBottom: 24, textAlign: "center", color: "var(--t-success-fg)",
         }}>
           🟢 Sin mesas pendientes de servir en este momento
         </div>
@@ -244,11 +244,12 @@ export default function HostBoard({
                       gridTemplateColumns: "1fr auto auto auto auto auto",
                       gap: 10,
                       alignItems: "center",
-                      background: row.isOverdue ? "#fef2f2" : "#ecfdf5",
-                      border: row.isOverdue ? "1px solid #fca5a5" : "1px solid #bbf7d0",
+                      background: row.isOverdue ? "var(--t-danger-soft)" : "var(--t-success-soft)",
+                      border: row.isOverdue ? "1px solid var(--t-danger-border)" : "1px solid var(--t-success-border)",
                       borderRadius: 8,
                       padding: "10px 12px",
                       fontSize: 13,
+                      color: "var(--t-fg)",
                     }}
                   >
                     <div>
@@ -258,12 +259,12 @@ export default function HostBoard({
                         {" · "}
                         {new Date(row.readyAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
                         {" · "}
-                        <span style={{ color: row.waitingMinutes >= 10 ? "#b91c1c" : "#166534", fontWeight: 600 }}>
+                        <span style={{ color: row.waitingMinutes >= 10 ? "var(--t-danger-fg)" : "var(--t-success-fg)", fontWeight: 600 }}>
                           {row.waitingMinutes} min esperando
                         </span>
                       </div>
                     </div>
-                    <strong style={{ color: "#166534" }}>{formatCOP(Number(row.total))}</strong>
+                    <strong style={{ color: "var(--t-success-fg)" }}>{formatCOP(Number(row.total))}</strong>
                     <button onClick={() => onOpenOrder(row.tableSessionId)} style={btnPrimary}>Abrir</button>
                     {row.hostWhatsAppLink && (
                       <a
@@ -371,12 +372,12 @@ function Kpi({ label, value, accent }: { label: string; value: string; accent: s
 
 const btnPrimary: React.CSSProperties = {
   padding: "6px 12px", borderRadius: 6, border: "none",
-  background: "#16a34a", color: "#fff", cursor: "pointer", fontSize: 13,
+  background: "var(--t-green-fg)", color: "var(--t-primary-fg)", cursor: "pointer", fontSize: 13,
 };
 
 const btnGhost: React.CSSProperties = {
   padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)",
-  background: "var(--t-card)", cursor: "pointer", fontSize: 13,
+  background: "var(--t-card)", color: "var(--t-fg)", cursor: "pointer", fontSize: 13,
 };
 
 const btnGhostSmall: React.CSSProperties = {

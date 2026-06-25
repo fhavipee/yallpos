@@ -215,10 +215,16 @@ export class CatalogService {
       include: { variants: true },
     });
 
-    if (warehouse && product.variants[0] && !product.isIngredient && product.type !== "recipe") {
-      await this.prisma.stockLevel.create({
-        data: { warehouseId: warehouse.id, variantId: product.variants[0].id, quantity: 100 },
-      });
+    if (warehouse && product.variants[0]) {
+      if (product.isIngredient) {
+        await this.prisma.stockLevel.create({
+          data: { warehouseId: warehouse.id, variantId: product.variants[0].id, quantity: 0 },
+        });
+      } else if (product.type !== "recipe") {
+        await this.prisma.stockLevel.create({
+          data: { warehouseId: warehouse.id, variantId: product.variants[0].id, quantity: 100 },
+        });
+      }
     }
 
     return product;

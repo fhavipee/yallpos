@@ -29,21 +29,15 @@ export default function Login({ onLogin }: Props) {
   }
 
   return (
-    <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%)",
-    }}>
-      <form onSubmit={submit} style={{
-        background: "var(--t-card)", borderRadius: 16, padding: 32, width: 360,
-        boxShadow: "0 20px 60px rgba(0,0,0,0.3)",
-      }}>
+    <div className="yall-login-shell">
+      <form onSubmit={submit} className="yall-login-form">
         <div style={{ textAlign: "center", marginBottom: 24 }}>
           <div style={{ fontSize: 32, fontWeight: 800, color: "#2563eb" }}>YallPos</div>
           <div style={{ color: "var(--t-muted)", fontSize: 14 }}>POS para restaurantes y panaderías</div>
         </div>
 
         {error && (
-          <div style={{ background: "var(--t-danger-soft)", color: "#b91c1c", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 14 }}>
+          <div style={{ background: "var(--t-danger-soft)", color: "var(--t-danger-fg)", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 14, border: "1px solid var(--t-danger-border)" }}>
             {error}
           </div>
         )}
@@ -57,9 +51,9 @@ export default function Login({ onLogin }: Props) {
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} required />
         </label>
 
-        <button type="submit" disabled={loading} style={{
+        <button type="submit" disabled={loading} className="yall-touch-btn" style={{
           width: "100%", padding: 14, marginTop: 8, borderRadius: 10, border: "none",
-          background: "#2563eb", color: "#fff", fontWeight: 700, fontSize: 16, cursor: "pointer",
+          background: "var(--t-primary)", color: "var(--t-primary-fg)", fontWeight: 700, fontSize: 16, cursor: "pointer",
           opacity: loading ? 0.7 : 1,
         }}>
           {loading ? "Entrando…" : "Iniciar sesión"}

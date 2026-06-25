@@ -131,7 +131,7 @@ export default function AdminModifiersView() {
             }} saving={saving} disabled={!gForm.name.trim()} />
           }>
             <Field label="Nombre"><input style={adminStyles.input} value={gForm.name} onChange={(e) => setGForm({ ...gForm, name: e.target.value })} /></Field>
-            <div style={adminStyles.grid2}>
+            <div className={adminStyles.grid2}>
               <Field label="Mínimo a elegir"><input type="number" min={0} style={adminStyles.input} value={gForm.minSelect} onChange={(e) => setGForm({ ...gForm, minSelect: Number(e.target.value) })} /></Field>
               <Field label="Máximo a elegir"><input type="number" min={0} style={adminStyles.input} value={gForm.maxSelect} onChange={(e) => setGForm({ ...gForm, maxSelect: Number(e.target.value) })} /></Field>
             </div>

@@ -23,6 +23,7 @@ type User = {
   email: string;
   role: string;
   roleId?: string;
+  hasPin?: boolean;
   isActive: boolean;
   lastLoginAt?: string;
   tenantRole?: { id: string; name: string; slug: string; isSystem: boolean };
@@ -33,7 +34,7 @@ export default function AdminUsersView() {
   const runAction = useAdminAction();
   const [modal, setModal] = useState<"new" | User | null>(null);
   const [resetId, setResetId] = useState<string | null>(null);
-  const [form, setForm] = useState({ email: "", name: "", roleId: "", password: "" });
+  const [form, setForm] = useState({ email: "", name: "", roleId: "", password: "", pin: "", clearPin: false });
   const [newPassword, setNewPassword] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -54,12 +55,19 @@ export default function AdminUsersView() {
   const defaultRoleId = roles.find((r) => r.slug === "waiter")?.id ?? roles[0]?.id ?? "";
 
   function openNew() {
-    setForm({ email: "", name: "", roleId: defaultRoleId, password: "" });
+    setForm({ email: "", name: "", roleId: defaultRoleId, password: "", pin: "", clearPin: false });
     setModal("new");
   }
 
   function openEdit(u: User) {
-    setForm({ email: u.email, name: u.name, roleId: u.roleId ?? u.tenantRole?.id ?? defaultRoleId, password: "" });
+    setForm({
+      email: u.email,
+      name: u.name,
+      roleId: u.roleId ?? u.tenantRole?.id ?? defaultRoleId,
+      password: "",
+      pin: "",
+      clearPin: false,
+    });
     setModal(u);
   }
 
@@ -73,12 +81,14 @@ export default function AdminUsersView() {
       return;
     }
     setSaving(true);
-    const body: Record<string, string> = {
+    const body: Record<string, string | boolean> = {
       email: form.email.trim(),
       name: form.name.trim(),
       roleId: form.roleId,
     };
     if (form.password) body.password = form.password;
+    if (form.pin.trim()) body.pin = form.pin.trim();
+    if (form.clearPin) body.clearPin = true;
     await runAction(async () => {
       if (modal === "new") await api.post("/v1/admin/users", body);
       else if (modal) await api.patch(`/v1/admin/users/${modal.id}`, body);
@@ -112,6 +122,7 @@ export default function AdminUsersView() {
                   <th style={adminStyles.th}>Nombre</th>
                   <th style={adminStyles.th}>Email</th>
                   <th style={adminStyles.th}>Rol</th>
+                  <th style={adminStyles.th}>PIN</th>
                   <th style={adminStyles.th}>Último login</th>
                   <th style={adminStyles.th}>ID</th>
                   <th style={adminStyles.th}></th>
@@ -126,6 +137,7 @@ export default function AdminUsersView() {
                       {u.tenantRole?.name ?? u.role}
                       {u.tenantRole && !u.tenantRole.isSystem && <span style={{ fontSize: 11, color: "var(--t-muted)" }}> (custom)</span>}
                     </td>
+                    <td style={adminStyles.td}>{u.hasPin ? "●●●●" : "—"}</td>
                     <td style={adminStyles.td}>{u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString("es-CO") : "Nunca"}</td>
                     <td style={adminStyles.td}><IdChip id={u.id} /></td>
                     <td style={adminStyles.td}>
@@ -160,6 +172,21 @@ export default function AdminUsersView() {
             <Field label={modal === "new" ? "Contraseña inicial" : "Nueva contraseña (opcional)"} hint="Mínimo 6 caracteres">
               <input type="password" style={adminStyles.input} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
             </Field>
+            <Field label="PIN operativo" hint="4-6 dígitos — modo mesero / identificación rápida">
+              <input
+                style={adminStyles.input}
+                inputMode="numeric"
+                value={form.pin}
+                placeholder={modal !== "new" && modal?.hasPin ? "•••• configurado" : "Opcional"}
+                onChange={(e) => setForm({ ...form, pin: e.target.value.replace(/\D/g, "").slice(0, 6), clearPin: false })}
+              />
+            </Field>
+            {modal !== "new" && modal?.hasPin && (
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
+                <input type="checkbox" checked={form.clearPin} onChange={(e) => setForm({ ...form, clearPin: e.target.checked, pin: "" })} />
+                Quitar PIN asignado
+              </label>
+            )}
           </AdminModal>
         )}
 

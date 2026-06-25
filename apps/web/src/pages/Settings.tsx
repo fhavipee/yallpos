@@ -34,7 +34,7 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
   const [testing, setTesting] = useState<"cash" | "kitchen" | null>(null);
   const [waiters, setWaiters] = useState<{ id: string; name: string; phone?: string | null }[]>([]);
   const [savingWaiterId, setSavingWaiterId] = useState<string | null>(null);
-  const [kiosk, setKiosk] = useState({ waiterExitPin: "2025" });
+  const [kiosk, setKiosk] = useState({ adminPin: "", hasAdminPin: false });
 
   useEffect(() => {
     setBranchId(branchId);
@@ -62,7 +62,7 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
         tableReadySlaWebhookEnabled: n.tableReadySlaWebhookEnabled !== false,
       });
       const k = r.data?.kiosk ?? {};
-      setKiosk({ waiterExitPin: k.waiterExitPin ?? "2025" });
+      setKiosk({ adminPin: "", hasAdminPin: Boolean(k.hasAdminPin) });
     }).catch(() => {});
     api.get("/v1/restaurant/waiters").then((r) => setWaiters(r.data)).catch(() => {});
     refreshAgent();
@@ -130,11 +130,16 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
   }
 
   async function saveKioskSettings() {
-    await api.patch("/v1/settings/branch", {
-      kiosk: {
-        waiterExitPin: kiosk.waiterExitPin.trim() || "2025",
-      },
-    });
+    if (!kiosk.adminPin.trim() && !kiosk.hasAdminPin) {
+      alert("Ingresa un PIN de administrador (4-6 dígitos)");
+      return;
+    }
+    if (kiosk.adminPin.trim()) {
+      await api.patch("/v1/settings/branch", {
+        kiosk: { adminPin: kiosk.adminPin.trim() },
+      });
+      setKiosk((k) => ({ adminPin: "", hasAdminPin: true }));
+    }
     flashSaved();
   }
 
@@ -183,7 +188,7 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
   return (
     <div style={{ maxWidth: 560 }}>
       <h2>Configuración</h2>
-      {saved && <div style={{ background: "#dcfce7", padding: 10, borderRadius: 8, marginBottom: 16, color: "#166534" }}>✅ Guardado</div>}
+      {saved && <div className="yall-alert-success" style={{ padding: 10, borderRadius: 8, marginBottom: 16 }}>✅ Guardado</div>}
 
       <section style={sectionStyle}>
         <h3>Impresoras térmicas</h3>
@@ -343,7 +348,7 @@ node index.js`}
                     const phone = e.target.value;
                     setWaiters((list) => list.map((w) => (w.id === waiter.id ? { ...w, phone } : w)));
                   }}
-                  style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                  style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-input-bg)", color: "var(--t-input-fg)" }}
                 />
               </label>
               <button
@@ -365,14 +370,17 @@ node index.js`}
           Ideal para meseros en salón.
         </p>
         <Field
-          label="PIN para salir del modo mesero"
-          value={kiosk.waiterExitPin}
-          onChange={(v) => setKiosk({ ...kiosk, waiterExitPin: v })}
-          placeholder="2025"
+          label="PIN de administrador / gerente"
+          value={kiosk.adminPin}
+          onChange={(v) => setKiosk({ ...kiosk, adminPin: v.replace(/\D/g, "").slice(0, 6) })}
+          placeholder={kiosk.hasAdminPin ? "•••• (configurado — ingresa uno nuevo para cambiar)" : "2025"}
         />
+        <p style={{ fontSize: 12, color: "var(--t-muted)", marginTop: -8 }}>
+          Protege salir del modo mesero y cerrar sesión en el quiosco. Los meseros tienen su propio PIN en Admin → Personal o Usuarios.
+        </p>
         <div style={{ fontSize: 13, marginBottom: 12, wordBreak: "break-all" }}>
           <strong>URL tablet:</strong>{" "}
-          <a href={waiterKioskUrl()} target="_blank" rel="noreferrer" style={{ color: "#2563eb" }}>
+          <a href={waiterKioskUrl()} target="_blank" rel="noreferrer" style={{ color: "var(--t-link)" }}>
             {waiterKioskUrl()}
           </a>
         </div>
@@ -427,11 +435,11 @@ function Field({ label, value, onChange, placeholder }: { label: string; value: 
   return (
     <label style={{ display: "grid", gap: 4, fontSize: 14, marginBottom: 10 }}>
       {label}
-      <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)" }} />
+      <input value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-input-bg)", color: "var(--t-input-fg)" }} />
     </label>
   );
 }
 
 const sectionStyle: React.CSSProperties = { background: "var(--t-card)", border: "1px solid var(--t-border)", borderRadius: 12, padding: 20, marginBottom: 16 };
-const btnSave: React.CSSProperties = { padding: "10px 16px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer", marginTop: 8 };
-const btnOutline: React.CSSProperties = { padding: "10px 16px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", marginTop: 8 };
+const btnSave: React.CSSProperties = { padding: "10px 16px", borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer", marginTop: 8 };
+const btnOutline: React.CSSProperties = { padding: "10px 16px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", color: "var(--t-fg)", cursor: "pointer", marginTop: 8 };

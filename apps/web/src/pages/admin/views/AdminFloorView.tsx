@@ -211,7 +211,7 @@ export default function AdminFloorView() {
             <ModalFooter onCancel={() => setBulkModal(false)} onSave={bulkCreate} saving={saving} saveLabel="Crear mesas" disabled={!bulkForm.diningAreaId || bulkForm.to < bulkForm.from} />
           }>
             <Field label="Prefijo"><input style={adminStyles.input} value={bulkForm.prefix} onChange={(e) => setBulkForm({ ...bulkForm, prefix: e.target.value })} placeholder="M" /></Field>
-            <div style={adminStyles.grid2}>
+            <div className={adminStyles.grid2}>
               <Field label="Desde número"><input type="number" style={adminStyles.input} value={bulkForm.from} onChange={(e) => setBulkForm({ ...bulkForm, from: Number(e.target.value) })} /></Field>
               <Field label="Hasta número"><input type="number" style={adminStyles.input} value={bulkForm.to} onChange={(e) => setBulkForm({ ...bulkForm, to: Number(e.target.value) })} /></Field>
             </div>

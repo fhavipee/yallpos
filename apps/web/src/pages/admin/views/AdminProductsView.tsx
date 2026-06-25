@@ -52,15 +52,16 @@ type RecipeLineForm = { ingredientVariantId: string; quantity: string; unit: str
 
 type Category = { id: string; name: string };
 
-const emptyForm = () => ({
+const emptyForm = (isIngredient = false) => ({
   name: "",
   description: "",
   categoryId: "",
   type: "standard",
+  isIngredient,
   taxType: "iva_19",
   consumptionTaxType: "none",
   course: "main",
-  price: "",
+  price: isIngredient ? "0" : "",
   cost: "",
   barcode: "",
   sku: "",
@@ -77,6 +78,7 @@ export default function AdminProductsView() {
   const [recipeLines, setRecipeLines] = useState<RecipeLineForm[]>([]);
   const [ingredientSearch, setIngredientSearch] = useState("");
   const [recipeSaving, setRecipeSaving] = useState(false);
+  const [viewMode, setViewMode] = useState<"products" | "ingredients">("products");
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
 
@@ -108,22 +110,34 @@ export default function AdminProductsView() {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return products.filter((p) => {
-      if (p.isIngredient) return false;
+      if (viewMode === "products" ? p.isIngredient : !p.isIngredient) return false;
       if (categoryFilter && p.category?.id !== categoryFilter) return false;
       return !q || p.name.toLowerCase().includes(q) || p.variants[0]?.barcode?.includes(q) || p.variants[0]?.sku?.toLowerCase().includes(q);
     });
-  }, [products, search, categoryFilter]);
+  }, [products, search, categoryFilter, viewMode]);
+
+  const variantCostMap = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of products) {
+      for (const v of p.variants) map.set(v.id, Number(v.cost ?? 0));
+    }
+    return map;
+  }, [products]);
 
   const ingredientOptions = useMemo(() => {
     const q = ingredientSearch.toLowerCase();
-    return ingredients.flatMap((p) =>
-      p.variants.map((v) => ({
-        variantId: v.id,
-        label: `${p.name}${v.name !== p.name ? ` · ${v.name}` : ""}`,
-        unit: v.unit,
-      })),
-    ).filter((o) => !q || o.label.toLowerCase().includes(q));
-  }, [ingredients, ingredientSearch]);
+    const excludeId = recipeModal?.id;
+    return products
+      .filter((p) => p.id !== excludeId)
+      .flatMap((p) =>
+        p.variants.map((v) => ({
+          variantId: v.id,
+          label: `${p.name}${v.name !== p.name ? ` · ${v.name}` : ""}${p.isIngredient ? "" : " (producto)"}`,
+          unit: v.unit ?? "und",
+        })),
+      )
+      .filter((o) => !q || o.label.toLowerCase().includes(q));
+  }, [products, ingredientSearch, recipeModal?.id]);
 
   function openRecipeModal(product: Product) {
     setRecipeModal(product);
@@ -163,10 +177,10 @@ export default function AdminProductsView() {
 
   const recipeCostPreview = useMemo(() => {
     return recipeLines.reduce((sum, line) => {
-      const ing = ingredients.flatMap((p) => p.variants).find((v) => v.id === line.ingredientVariantId);
-      return sum + Number(line.quantity || 0) * Number(ing?.cost ?? 0);
+      const unitCost = variantCostMap.get(line.ingredientVariantId) ?? 0;
+      return sum + Number(line.quantity || 0) * unitCost;
     }, 0);
-  }, [recipeLines, ingredients]);
+  }, [recipeLines, variantCostMap]);
 
   const taxLabel = (p: Product) => {
     const iva = ivaOptions.find((t) => t.code === productIva(p))?.name ?? productIva(p);
@@ -182,6 +196,7 @@ export default function AdminProductsView() {
       description: p.description ?? "",
       categoryId: p.category?.id ?? "",
       type: p.type,
+      isIngredient: p.isIngredient ?? false,
       taxType: productIva(p),
       consumptionTaxType: productInc(p),
       course: p.course ?? "main",
@@ -201,11 +216,12 @@ export default function AdminProductsView() {
       name: form.name.trim(),
       description: form.description || undefined,
       categoryId: form.categoryId || undefined,
-      type: form.type,
+      type: form.isIngredient ? "standard" : form.type,
+      isIngredient: form.isIngredient,
       taxType: form.taxType,
       consumptionTaxType: form.consumptionTaxType,
       course: form.course,
-      price: Number(form.price),
+      price: form.isIngredient ? 0 : Number(form.price),
       cost: Number(form.cost) || 0,
       barcode: form.barcode || undefined,
       sku: form.sku || undefined,
@@ -226,19 +242,45 @@ export default function AdminProductsView() {
       <>
         <AdminPageHeader
           title="Productos"
-          desc="Catálogo completo: precio, impuesto, barcode, curso KDS y categoría."
+          desc="Productos de venta, insumos de cocina y recetas. Los insumos no aparecen en el POS; al cobrar un plato con receta se descuenta su inventario."
           actions={
             <>
               <ReloadButton onClick={reload} />
-              <button type="button" style={{ ...adminStyles.btnPrimary, marginLeft: 8 }} onClick={() => { setForm(emptyForm()); setModal("new"); }}>
-                + Nuevo producto
+              <button
+                type="button"
+                style={{ ...adminStyles.btnPrimary, marginLeft: 8 }}
+                onClick={() => {
+                  setForm(emptyForm(viewMode === "ingredients"));
+                  setModal("new");
+                }}
+              >
+                {viewMode === "ingredients" ? "+ Nuevo insumo" : "+ Nuevo producto"}
               </button>
             </>
           }
         />
 
+        <AdminSection title="Vista">
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              type="button"
+              style={viewMode === "products" ? adminStyles.btnPrimary : adminStyles.btnSecondary}
+              onClick={() => setViewMode("products")}
+            >
+              Productos de venta
+            </button>
+            <button
+              type="button"
+              style={viewMode === "ingredients" ? adminStyles.btnPrimary : adminStyles.btnSecondary}
+              onClick={() => setViewMode("ingredients")}
+            >
+              Insumos ({ingredients.length})
+            </button>
+          </div>
+        </AdminSection>
+
         <AdminSection title="Buscar y filtrar">
-          <div style={adminStyles.grid2}>
+          <div className={adminStyles.grid2}>
             <Field label="Texto">
               <input style={adminStyles.input} placeholder="Nombre, SKU o código de barras…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </Field>
@@ -251,19 +293,21 @@ export default function AdminProductsView() {
           </div>
         </AdminSection>
 
-        <AdminSection title={`${filtered.length} productos`}>
+        <AdminSection title={`${filtered.length} ${viewMode === "ingredients" ? "insumos" : "productos"}`}>
           {filtered.length === 0 ? (
-            <EmptyState text="No hay productos que coincidan." />
+            <EmptyState text={viewMode === "ingredients" ? "No hay insumos. Crea uno con «+ Nuevo insumo»." : "No hay productos que coincidan."} />
           ) : (
+            <div className="yall-table-wrap">
             <table style={adminStyles.table}>
               <thead>
                 <tr>
-                  <th style={adminStyles.th}>Producto</th>
+                  <th style={adminStyles.th}>{viewMode === "ingredients" ? "Insumo" : "Producto"}</th>
                   <th style={adminStyles.th}>Categoría</th>
-                  <th style={adminStyles.th}>Precio</th>
-                  <th style={adminStyles.th}>IVA</th>
-                  <th style={adminStyles.th}>Ingredientes</th>
-                  <th style={adminStyles.th}>Curso</th>
+                  {viewMode === "products" && <th style={adminStyles.th}>Precio</th>}
+                  <th style={adminStyles.th}>Costo</th>
+                  {viewMode === "products" && <th style={adminStyles.th}>IVA</th>}
+                  {viewMode === "products" && <th style={adminStyles.th}>Receta</th>}
+                  {viewMode === "products" && <th style={adminStyles.th}>Curso</th>}
                   <th style={adminStyles.th}>Barcode</th>
                   <th style={adminStyles.th}>Unidad</th>
                   <th style={adminStyles.th}>Estado</th>
@@ -278,18 +322,27 @@ export default function AdminProductsView() {
                       <div><IdChip id={p.id} /></div>
                     </td>
                     <td style={adminStyles.td}>{p.category?.name ?? "—"}</td>
-                    <td style={adminStyles.td}>{formatCOP(Number(p.variants[0]?.price ?? 0))}</td>
-                    <td style={adminStyles.td}>{taxLabel(p)}</td>
-                    <td style={adminStyles.td}>
-                      {(p.recipeLines?.length ?? 0) > 0 ? `${p.recipeLines!.length} ítems` : "—"}
-                    </td>
-                    <td style={adminStyles.td}>{courseLabel(p.course)}</td>
+                    {viewMode === "products" && (
+                      <td style={adminStyles.td}>{formatCOP(Number(p.variants[0]?.price ?? 0))}</td>
+                    )}
+                    <td style={adminStyles.td}>{formatCOP(Number(p.variants[0]?.cost ?? 0))}</td>
+                    {viewMode === "products" && <td style={adminStyles.td}>{taxLabel(p)}</td>}
+                    {viewMode === "products" && (
+                      <td style={adminStyles.td}>
+                        {(p.recipeLines?.length ?? 0) > 0 ? `${p.recipeLines!.length} ítems` : "—"}
+                      </td>
+                    )}
+                    {viewMode === "products" && <td style={adminStyles.td}>{courseLabel(p.course)}</td>}
                     <td style={adminStyles.td}>{p.variants[0]?.barcode ?? "—"}</td>
-                    <td style={adminStyles.td}>{p.variants[0]?.sellByWeight ? p.variants[0]?.unit ?? "kg" : "und"}</td>
+                    <td style={adminStyles.td}>{p.variants[0]?.sellByWeight ? p.variants[0]?.unit ?? "kg" : p.variants[0]?.unit ?? "und"}</td>
                     <td style={adminStyles.td}><Badge ok={p.isActive} label={p.isActive ? "Activo" : "Inactivo"} /></td>
                     <td style={adminStyles.td}>
                       <button type="button" style={adminStyles.btnSecondary} onClick={() => openEdit(p)}>Editar</button>{" "}
-                      <button type="button" style={adminStyles.btnSecondary} onClick={() => openRecipeModal(p)}>Ingredientes</button>{" "}
+                      {viewMode === "products" && (
+                        <>
+                          <button type="button" style={adminStyles.btnSecondary} onClick={() => openRecipeModal(p)}>Receta</button>{" "}
+                        </>
+                      )}
                       <button type="button" style={adminStyles.btnDanger} onClick={async () => {
                         await runAction(async () => {
                           await api.patch(`/v1/catalog/products/${p.id}`, { isActive: !p.isActive });
@@ -301,22 +354,45 @@ export default function AdminProductsView() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </AdminSection>
 
         {modal && (
           <AdminModal
-            title={modal === "new" ? "Nuevo producto" : `Editar: ${(modal as Product).name}`}
+            title={
+              modal === "new"
+                ? form.isIngredient ? "Nuevo insumo" : "Nuevo producto"
+                : `Editar: ${(modal as Product).name}`
+            }
             onClose={() => setModal(null)}
-            footer={<ModalFooter onCancel={() => setModal(null)} onSave={save} saving={saving} disabled={!form.name.trim() || !form.price} />}
+            footer={
+              <ModalFooter
+                onCancel={() => setModal(null)}
+                onSave={save}
+                saving={saving}
+                disabled={!form.name.trim() || (!form.isIngredient && !form.price)}
+              />
+            }
           >
+            <CheckboxField
+              label="Es insumo (no se vende en POS)"
+              hint="Materia prima o ingrediente de cocina. Aparece en recetas pero no en el menú de venta."
+              checked={form.isIngredient}
+              onChange={(v) => setForm({
+                ...form,
+                isIngredient: v,
+                price: v ? "0" : form.price,
+                type: v ? "standard" : form.type,
+              })}
+            />
             <Field label="Nombre">
               <input style={adminStyles.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </Field>
             <Field label="Descripción">
               <textarea style={{ ...adminStyles.input, minHeight: 60 }} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
             </Field>
-            <div style={adminStyles.grid2}>
+            <div className={adminStyles.grid2}>
               <Field label="Categoría">
                 <select style={adminStyles.select} value={form.categoryId} onChange={(e) => setForm({ ...form, categoryId: e.target.value })}>
                   <option value="">Sin categoría</option>
@@ -328,11 +404,13 @@ export default function AdminProductsView() {
                   {COURSES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
                 </select>
               </Field>
-              <Field label="Tipo">
-                <select style={adminStyles.select} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                  {PRODUCT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-              </Field>
+              {!form.isIngredient && (
+                <Field label="Tipo">
+                  <select style={adminStyles.select} value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                    {PRODUCT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  </select>
+                </Field>
+              )}
               <Field label="IVA">
                 <select style={adminStyles.select} value={form.taxType} onChange={(e) => setForm({ ...form, taxType: e.target.value })}>
                   {ivaOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
@@ -343,10 +421,12 @@ export default function AdminProductsView() {
                   {consumptionOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
                 </select>
               </Field>
-              <Field label="Precio venta">
-                <input type="number" style={adminStyles.input} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
-              </Field>
-              <Field label="Costo">
+              {!form.isIngredient && (
+                <Field label="Precio venta">
+                  <input type="number" style={adminStyles.input} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+                </Field>
+              )}
+              <Field label={form.isIngredient ? "Costo unitario" : "Costo"}>
                 <input type="number" style={adminStyles.input} value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
               </Field>
               <Field label="SKU">
@@ -389,7 +469,8 @@ export default function AdminProductsView() {
             }
           >
             <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 0 }}>
-              Al cobrar, el inventario descuenta estos insumos (no el plato terminado). Costo estimado: <strong>{formatCOP(recipeCostPreview)}</strong>
+              Puedes usar insumos o productos de venta como ingredientes. Al cobrar, se descuenta el stock de cada línea (no el plato terminado).
+              Costo estimado: <strong>{formatCOP(recipeCostPreview)}</strong>
             </p>
 
             {recipeLines.length > 0 && (
@@ -434,10 +515,10 @@ export default function AdminProductsView() {
               </table>
             )}
 
-            <Field label="Agregar insumo">
+            <Field label="Agregar ingrediente">
               <input
                 style={adminStyles.input}
-                placeholder="Buscar insumo…"
+                placeholder="Buscar insumo o producto…"
                 value={ingredientSearch}
                 onChange={(e) => setIngredientSearch(e.target.value)}
               />
@@ -449,10 +530,7 @@ export default function AdminProductsView() {
                     key={opt.variantId}
                     type="button"
                     onClick={() => addRecipeLine(opt.variantId, opt.label, opt.unit)}
-                    style={{
-                      display: "block", width: "100%", textAlign: "left", padding: "8px 12px",
-                      border: "none", background: "transparent", cursor: "pointer",
-                    }}
+                    className="yall-list-opt"
                   >
                     {opt.label}
                   </button>

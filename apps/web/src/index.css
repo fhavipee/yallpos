@@ -29,14 +29,29 @@
   --t-orange-soft: #fff7ed;
   --t-orange-border: #fdba74;
   --t-code-bg: #f8fafc;
+  --t-primary: #2563eb;
+  --t-primary-fg: #ffffff;
+  --t-link: #2563eb;
+  --t-link-hover: #1d4ed8;
+  --t-accent-fg: #2563eb;
+  --t-success-fg: #166534;
+  --t-warn-fg: #92400e;
+  --t-danger-fg: #b91c1c;
+  --t-green-fg: #16a34a;
+  --t-red-fg: #dc2626;
+  --t-orange-fg: #d97706;
+  --t-wa-bg: #e5ddd5;
+  --t-wa-border: #d1c7bc;
+  --t-wa-bubble-fg: #111827;
+  --t-wa-meta: #667781;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --t-bg: #1a1a2e;
+  --t-bg: #0f172a;
   --t-fg: #e2e8f0;
-  --t-card: #16213e;
-  --t-card-alt: #1e293b;
+  --t-card: #1e293b;
+  --t-card-alt: #162032;
   --t-card-hover: #334155;
   --t-border: #334155;
   --t-border-strong: #475569;
@@ -48,8 +63,8 @@
   --t-chip-fg: #e2e8f0;
   --t-select-bg: #0f172a;
   --t-select-fg: #e2e8f0;
-  --t-overlay: rgba(0, 0, 0, 0.65);
-  --t-shadow: rgba(0, 0, 0, 0.45);
+  --t-overlay: rgba(0, 0, 0, 0.72);
+  --t-shadow: rgba(0, 0, 0, 0.55);
   --t-accent-soft: #1e3a5f;
   --t-accent-border: #2563eb;
   --t-danger-soft: #450a0a;
@@ -61,6 +76,21 @@
   --t-orange-soft: #431407;
   --t-orange-border: #ea580c;
   --t-code-bg: #0f172a;
+  --t-primary: #2563eb;
+  --t-primary-fg: #ffffff;
+  --t-link: #60a5fa;
+  --t-link-hover: #93c5fd;
+  --t-accent-fg: #60a5fa;
+  --t-success-fg: #4ade80;
+  --t-warn-fg: #fbbf24;
+  --t-danger-fg: #f87171;
+  --t-green-fg: #4ade80;
+  --t-red-fg: #f87171;
+  --t-orange-fg: #fb923c;
+  --t-wa-bg: #0b141a;
+  --t-wa-border: #1f2c34;
+  --t-wa-bubble-fg: #e9edef;
+  --t-wa-meta: #8696a0;
 }
 
 *,
@@ -78,13 +108,796 @@ body,
   color: var(--t-fg);
 }
 
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--t-fg);
+}
+
+a {
+  color: var(--t-link);
+}
+
+a:hover {
+  color: var(--t-link-hover);
+}
+
 input,
 select,
-textarea {
+textarea,
+button {
   font: inherit;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+select,
+textarea {
+  background: var(--t-input-bg);
+  color: var(--t-input-fg);
 }
 
 select option {
   background: var(--t-select-bg);
   color: var(--t-select-fg);
 }
+
+.yall-panel {
+  background: var(--t-card);
+  border: 1px solid var(--t-border);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.yall-alert-success {
+  background: var(--t-success-soft);
+  border: 1px solid var(--t-success-border);
+  color: var(--t-success-fg);
+}
+
+.yall-alert-warn {
+  background: var(--t-warn-soft);
+  border: 1px solid var(--t-warn-border);
+  color: var(--t-warn-fg);
+}
+
+.yall-alert-danger {
+  background: var(--t-danger-soft);
+  border: 1px solid var(--t-danger-border);
+  color: var(--t-danger-fg);
+}
+
+.yall-list-opt {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--t-fg);
+  cursor: pointer;
+}
+
+.yall-list-opt:hover {
+  background: var(--t-card-hover);
+}
+
+/* ── Layout responsive (tablet / móvil) ── */
+
+.yall-app-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  flex-wrap: wrap;
+  background: var(--t-card);
+  border-bottom: 1px solid var(--t-border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.yall-app-header-start {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.yall-app-mobile-tab {
+  display: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t-muted);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.yall-app-brand {
+  font-weight: 800;
+  font-size: 18px;
+  color: var(--t-primary);
+  flex-shrink: 0;
+}
+
+.yall-app-branch {
+  padding: 8px 10px;
+  border-radius: 8px;
+  max-width: 220px;
+  border: 1px solid var(--t-border-strong);
+  background: var(--t-select-bg);
+  color: var(--t-select-fg);
+  min-height: 44px;
+}
+
+.yall-app-nav {
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.yall-app-nav button {
+  min-height: 40px;
+}
+
+.yall-app-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.yall-app-main {
+  padding: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+}
+
+.yall-login-form {
+  background: var(--t-card);
+  border-radius: 16px;
+  padding: 32px;
+  width: min(360px, calc(100vw - 32px));
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+}
+
+.yall-login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  padding-top: calc(16px + env(safe-area-inset-top));
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%);
+}
+
+/* POS: productos + ticket */
+.yall-pos-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+  align-items: start;
+}
+
+.yall-pos-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.yall-pos-ticket {
+  position: sticky;
+  top: 72px;
+}
+
+.yall-pos-ticket-inner {
+  background: var(--t-card);
+  border: 1px solid var(--t-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.yall-product-btn {
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--t-border);
+  cursor: pointer;
+  text-align: left;
+  min-height: 72px;
+  touch-action: manipulation;
+}
+
+.yall-chip-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.yall-chip-row button {
+  min-height: 40px;
+  padding: 8px 14px;
+  touch-action: manipulation;
+}
+
+.yall-search-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.yall-search-row input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+}
+
+/* Admin */
+.yall-admin-shell {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.yall-admin-content {
+  flex: 1;
+  min-width: 0;
+  max-width: 960px;
+}
+
+.yall-admin-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--t-border);
+  padding-right: 16px;
+}
+
+.yall-admin-mobile-picker {
+  display: none;
+  width: 100%;
+  margin-bottom: 16px;
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--t-border-strong);
+  background: var(--t-select-bg);
+  color: var(--t-select-fg);
+  font-size: 15px;
+}
+
+.yall-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.yall-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+
+.yall-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  margin: 0 -4px;
+  padding: 0 4px 4px;
+}
+
+.yall-table-wrap table {
+  min-width: 560px;
+}
+
+.yall-scroll-row {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.yall-tables-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.yall-touch-btn {
+  min-height: 44px;
+  min-width: 44px;
+  touch-action: manipulation;
+}
+
+.yall-hide-mobile {
+  display: block;
+}
+
+.yall-hide-desktop {
+  display: none;
+}
+
+/* Tablet */
+@media (max-width: 900px) {
+  .yall-hide-mobile {
+    display: none !important;
+  }
+
+  .yall-hide-desktop {
+    display: block;
+  }
+
+  .yall-app-header {
+    flex-wrap: nowrap;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+
+  .yall-app-header--compact {
+    padding-top: calc(8px + env(safe-area-inset-top));
+  }
+
+  .yall-app-mobile-tab {
+    display: block;
+  }
+
+  .yall-app-brand {
+    font-size: 16px;
+    line-height: 1.1;
+  }
+
+  .yall-app-branch {
+    flex: 1;
+    min-width: 0;
+    max-width: none;
+    font-size: 13px;
+    padding: 6px 8px;
+    text-overflow: ellipsis;
+  }
+
+  .yall-app-actions {
+    margin-left: 0;
+    flex-shrink: 0;
+  }
+
+  .yall-pos-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .yall-pos-ticket {
+    position: sticky;
+    bottom: 0;
+    top: auto;
+    z-index: 8;
+    margin: 0 -4px;
+  }
+
+  .yall-pos-ticket-inner {
+    max-height: min(48vh, 420px);
+    overflow: auto;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -10px 32px var(--t-shadow);
+  }
+
+  .yall-pos-products {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  }
+
+  .yall-admin-shell {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .yall-admin-sidebar {
+    display: none;
+  }
+
+  .yall-admin-mobile-picker {
+    display: block;
+  }
+
+  .yall-app-main {
+    padding: 12px;
+  }
+}
+
+/* Móvil */
+@media (max-width: 640px) {
+  .yall-app-header {
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .yall-app-main {
+    padding: 10px;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+
+  .yall-pos-products {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .yall-product-btn {
+    padding: 14px 12px;
+    min-height: 80px;
+  }
+
+  .yall-grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .yall-page-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .yall-tables-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .yall-hide-mobile {
+    display: none !important;
+  }
+
+  .yall-hide-desktop {
+    display: block;
+  }
+
+  .yall-login-form {
+    padding: 24px 20px;
+  }
+
+  .yall-pos-ticket-inner button,
+  .yall-chip-row button {
+    min-height: 44px;
+  }
+}
+
+/* Tablet landscape: 3 columnas productos */
+@media (min-width: 641px) and (max-width: 900px) {
+  .yall-pos-products {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .yall-tables-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+}
+
+/* ── Barra inferior móvil ── */
+
+.yall-app-shell--mobile-nav .yall-app-main {
+  padding-bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+.yall-app-bottom-nav {
+  display: none;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 4px;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  background: var(--t-card);
+  border-top: 1px solid var(--t-border);
+  box-shadow: 0 -8px 28px var(--t-shadow);
+}
+
+.yall-app-bottom-nav--kiosk {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+}
+
+@media (max-width: 900px) {
+  .yall-app-bottom-nav:not(.yall-app-bottom-nav--kiosk) {
+    display: grid;
+  }
+}
+
+.yall-bottom-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 56px;
+  padding: 6px 4px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--t-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  touch-action: manipulation;
+}
+
+.yall-bottom-tab__icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.yall-bottom-tab__label {
+  line-height: 1.1;
+  text-align: center;
+}
+
+.yall-bottom-tab--active {
+  background: var(--t-accent-soft);
+  color: var(--t-accent-fg);
+}
+
+.yall-bottom-tab--dimmed {
+  opacity: 0.45;
+}
+
+/* Sheet «Más» */
+.yall-more-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: var(--t-overlay);
+  display: flex;
+  align-items: flex-end;
+}
+
+.yall-more-sheet__panel {
+  width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  background: var(--t-card);
+  border-radius: 16px 16px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--t-border);
+}
+
+.yall-more-sheet__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 12px;
+  gap: 12px;
+}
+
+.yall-more-sheet__user {
+  font-size: 12px;
+  color: var(--t-muted);
+  margin-top: 2px;
+  font-weight: 400;
+}
+
+.yall-more-sheet__close {
+  border: none;
+  background: transparent;
+  font-size: 24px;
+  color: var(--t-muted);
+  cursor: pointer;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.yall-more-sheet__item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 14px 12px;
+  border: none;
+  border-bottom: 1px solid var(--t-border);
+  background: transparent;
+  color: var(--t-fg);
+  font-size: 15px;
+  cursor: pointer;
+  min-height: 48px;
+}
+
+.yall-more-sheet__item:last-child {
+  border-bottom: none;
+}
+
+/* Banner instalar PWA */
+.yall-pwa-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: var(--t-accent-soft);
+  border: 1px solid var(--t-accent-border);
+  color: var(--t-fg);
+  flex-wrap: wrap;
+}
+
+.yall-pwa-banner__btn {
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: none;
+  background: var(--t-primary);
+  color: var(--t-primary-fg);
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.yall-pwa-banner__dismiss {
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--t-muted);
+  font-size: 20px;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+/* Swipe hint */
+.yall-swipe-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: var(--t-muted);
+  text-align: center;
+}
+
+.yall-app-main--swipe {
+  touch-action: pan-y;
+}
+
+/* POS landscape en tablet — productos + ticket lado a lado */
+@media (orientation: landscape) and (min-width: 641px) and (max-height: 520px),
+  (orientation: landscape) and (min-width: 700px) and (max-width: 1180px) and (max-height: 800px) {
+  .yall-pos-layout {
+    grid-template-columns: 1fr min(340px, 36vw);
+    gap: 12px;
+  }
+
+  .yall-pos-ticket {
+    position: sticky;
+    top: 56px;
+    bottom: auto;
+    margin: 0;
+  }
+
+  .yall-pos-ticket-inner {
+    max-height: calc(100vh - 68px);
+    overflow: auto;
+    border-radius: 12px;
+    box-shadow: none;
+  }
+
+  .yall-pos-products {
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+  }
+
+  .yall-product-btn {
+    min-height: 64px;
+    padding: 10px;
+  }
+
+  .yall-app-shell--mobile-nav .yall-app-main {
+    padding-bottom: 12px;
+  }
+}
+
+@media (orientation: landscape) and (max-width: 900px) {
+  .yall-swipe-hint {
+    display: none;
+  }
+}
+
+/* PIN modal */
+.yall-pin-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: var(--t-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.yall-pin-modal__panel {
+  width: min(360px, 100%);
+  background: var(--t-card);
+  border-radius: 16px;
+  padding: 20px;
+  border: 1px solid var(--t-border);
+  box-shadow: 0 20px 50px var(--t-shadow);
+}
+
+.yall-pin-modal__title {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.yall-pin-modal__desc {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--t-muted);
+}
+
+.yall-pin-modal__input {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 28px;
+  letter-spacing: 0.3em;
+  text-align: center;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--t-border-strong);
+  background: var(--t-select-bg);
+  color: var(--t-select-fg);
+  margin-bottom: 8px;
+}
+
+.yall-pin-modal__error {
+  margin: 0 0 10px;
+  color: #dc2626;
+  font-size: 13px;
+}
+
+.yall-pin-modal__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.yall-pin-modal__btn {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.yall-pin-modal__btn--ghost {
+  background: transparent;
+  color: var(--t-muted);
+}
+
+.yall-pin-modal__btn--primary {
+  background: var(--t-primary);
+  color: var(--t-primary-fg);
+}
+
+.yall-kiosk-identify {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  background: #fef3c7;
+  color: #92400e;
+  font-size: 13px;
+  border-bottom: 1px solid #fcd34d;
+}
+
+.yall-kiosk-identify button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: #d97706;
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+

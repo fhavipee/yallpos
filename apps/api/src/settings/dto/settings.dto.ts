@@ -48,6 +48,9 @@ export class UpdateBranchSettingsDto {
 
   @IsOptional()
   kiosk?: {
+    /** PIN de gerente/administrador (4-6 dígitos). Se almacena hasheado. */
+    adminPin?: string;
+    /** @deprecated Usar adminPin — se migra automáticamente al guardar */
     waiterExitPin?: string;
   };
 }

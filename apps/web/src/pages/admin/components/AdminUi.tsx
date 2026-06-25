@@ -19,7 +19,7 @@ export const adminStyles = {
       border: "none",
       cursor: "pointer",
       background: active ? "var(--t-accent-soft)" : "transparent",
-      color: active ? "#60a5fa" : "var(--t-muted)",
+      color: active ? "var(--t-accent-fg)" : "var(--t-muted)",
       fontWeight: active ? 600 : 400,
       fontSize: 13,
     }) as const,
@@ -33,7 +33,7 @@ export const adminStyles = {
   } as const,
   sectionTitle: { margin: "0 0 4px", fontSize: 17, color: "var(--t-fg)" } as const,
   sectionDesc: { margin: "0 0 16px", fontSize: 13, color: "var(--t-muted)", lineHeight: 1.5 } as const,
-  grid2: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 } as const,
+  grid2: "yall-grid-2" as const,
   field: { marginBottom: 12 } as const,
   label: { display: "block", fontSize: 12, fontWeight: 600, color: "var(--t-muted)", marginBottom: 4 } as const,
   hint: { fontSize: 11, color: "var(--t-muted)", marginTop: 4 } as const,
@@ -60,8 +60,8 @@ export const adminStyles = {
     padding: "8px 16px",
     borderRadius: 8,
     border: "none",
-    background: "#2563eb",
-    color: "#fff",
+    background: "var(--t-primary)",
+    color: "var(--t-primary-fg)",
     cursor: "pointer",
     fontWeight: 600,
     fontSize: 13,
@@ -99,7 +99,7 @@ export const adminStyles = {
 
 export function AdminPageHeader({ title, desc, actions }: { title: string; desc?: string; actions?: ReactNode }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20, gap: 16 }}>
+    <div className="yall-page-header">
       <div>
         <h2 style={{ margin: 0, fontSize: 22, color: "var(--t-fg)" }}>{title}</h2>
         {desc && <p style={{ margin: "6px 0 0", color: "var(--t-muted)", fontSize: 14 }}>{desc}</p>}
@@ -150,7 +150,7 @@ export function Badge({ ok, label }: { ok: boolean; label?: string }) {
         fontSize: 11,
         fontWeight: 600,
         background: ok ? "var(--t-success-soft)" : "var(--t-warn-soft)",
-        color: ok ? "#4ade80" : "#fbbf24",
+        color: ok ? "var(--t-success-fg)" : "var(--t-warn-fg)",
       }}
     >
       {label ?? (ok ? "OK" : "Pendiente")}
@@ -178,7 +178,7 @@ export function AdminToast({ msg, type }: { msg: string; type: "ok" | "err" }) {
         padding: 12,
         borderRadius: 10,
         background: type === "ok" ? "var(--t-success-soft)" : "var(--t-danger-soft)",
-        color: type === "ok" ? "#4ade80" : "#f87171",
+        color: type === "ok" ? "var(--t-success-fg)" : "var(--t-danger-fg)",
         fontSize: 14,
       }}
     >
@@ -250,7 +250,7 @@ export function LoadingState({ text = "Cargando…" }: { text?: string }) {
 export function ErrorState({ text, onRetry }: { text: string; onRetry?: () => void }) {
   return (
     <div style={{ padding: 24, textAlign: "center" }}>
-      <p style={{ color: "#f87171", fontSize: 14, marginBottom: 12 }}>{text}</p>
+      <p style={{ color: "var(--t-danger-fg)", fontSize: 14, marginBottom: 12 }}>{text}</p>
       {onRetry && (
         <button type="button" style={adminStyles.btnSecondary} onClick={onRetry}>
           Reintentar

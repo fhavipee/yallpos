@@ -806,7 +806,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
           : "Escanea código de barras o toca un producto · Celular opcional para avisar cuando el pedido esté listo"}
       </p>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="yall-search-row">
         <input
           placeholder="Buscar o escanear..."
           value={search}
@@ -819,7 +819,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
               } catch { /* ignore */ }
             }
           }}
-          style={{ ...ui.input, flex: 1, minWidth: 200 }}
+          style={{ ...ui.input, flex: 1, minWidth: 0 }}
         />
         {isBakery && (
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -829,10 +829,10 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
         )}
       </div>
 
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="yall-chip-row">
         <button
           onClick={() => setSelectedCategory("")}
-          style={{ padding: "6px 12px", borderRadius: 20, border: "none", background: !selectedCategory ? "#2563eb" : "var(--t-chip-bg)", color: !selectedCategory ? "#fff" : "var(--t-chip-fg)", cursor: "pointer" }}
+          style={{ padding: "6px 12px", borderRadius: 20, border: "none", background: !selectedCategory ? "var(--t-primary)" : "var(--t-chip-bg)", color: !selectedCategory ? "var(--t-primary-fg)" : "var(--t-chip-fg)", cursor: "pointer" }}
         >
           Todos
         </button>
@@ -852,19 +852,18 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 320px", gap: 16 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10 }}>
+      <div className="yall-pos-layout">
+        <div className="yall-pos-products">
           {filtered.map((p) => {
             const v = p.variants[0];
             return (
               <button
                 key={p.id}
                 onClick={() => addProduct(p)}
+                className="yall-product-btn"
                 style={{
-                  padding: 16, borderRadius: 12, border: "1px solid var(--t-border)",
                   background: productCardBg(p.category?.color),
                   color: "var(--t-fg)",
-                  cursor: "pointer", textAlign: "left",
                 }}
               >
                 <div style={{ fontWeight: 700, fontSize: 14 }}>{p.name}</div>
@@ -877,7 +876,8 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
           })}
         </div>
 
-        <div style={{ ...ui.card, padding: 16, position: "sticky", top: 80 }}>
+        <div className="yall-pos-ticket">
+        <div className="yall-pos-ticket-inner">
           <h4 style={{ margin: "0 0 12px", color: "var(--t-fg)" }}>Ticket</h4>
           {inKitchen && (
             <div style={{
@@ -1059,13 +1059,14 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
             disabled={!invoice?.lines?.length}
             style={{
               width: "100%", marginTop: 10, padding: "14px 0", borderRadius: 10,
-              border: "none", background: "#16a34a", color: "#fff", fontWeight: 700, fontSize: 16,
+              border: "none", background: "var(--t-green-fg)", color: "var(--t-primary-fg)", fontWeight: 700, fontSize: 16,
               cursor: invoice?.lines?.length ? "pointer" : "not-allowed",
               opacity: invoice?.lines?.length ? 1 : 0.5,
             }}
           >
             Cobrar
           </button>
+        </div>
         </div>
       </div>
     </div>

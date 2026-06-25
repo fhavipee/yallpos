@@ -64,6 +64,7 @@ model User {
   tenantId     String
   email        String
   passwordHash String
+  pinHash      String?
   name         String
   role         UserRole
   roleId       String?
@@ -158,6 +159,7 @@ model Staff {
   branchId  String
   name      String
   phone     String?
+  pinHash   String?
   role      StaffRole
   isActive  Boolean   @default(true)
 

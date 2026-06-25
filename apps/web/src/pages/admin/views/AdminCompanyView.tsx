@@ -83,7 +83,7 @@ export default function AdminCompanyView() {
             <p style={{ fontSize: 13, color: "var(--t-muted)" }}>
               ID empresa: <IdChip id={company.id} /> · Régimen: {company.regimen ?? "—"}
             </p>
-            <div style={adminStyles.grid2}>
+            <div className={adminStyles.grid2}>
               <Field label="Nombre comercial">
                 <input style={adminStyles.input} value={company.name ?? ""} onChange={(e) => setField("name", e.target.value)} />
               </Field>
@@ -110,7 +110,7 @@ export default function AdminCompanyView() {
           </AdminSection>
 
           <AdminSection title="Contacto y ubicación">
-            <div style={adminStyles.grid2}>
+            <div className={adminStyles.grid2}>
               <Field label="Email facturación">
                 <input style={adminStyles.input} type="email" value={company.email ?? ""} onChange={(e) => setField("email", e.target.value)} />
               </Field>
