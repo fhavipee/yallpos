@@ -115,6 +115,24 @@ export class UpsertModifierOptionDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
+export class UpsertTaxDefinitionDto {
+  @IsIn(["iva", "consumption"]) kind!: "iva" | "consumption";
+  @IsString() code!: string;
+  @IsString() name!: string;
+  @IsNumber() rate!: number;
+  @IsOptional() @IsBoolean() isDefault?: boolean;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() sortOrder?: number;
+}
+
+export class UpdateTaxDefinitionDto {
+  @IsOptional() @IsString() name?: string;
+  @IsOptional() @IsNumber() rate?: number;
+  @IsOptional() @IsBoolean() isDefault?: boolean;
+  @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsInt() sortOrder?: number;
+}
+
 export class CreateFiscalResolutionDto {
   @IsIn(["invoice", "pos_equivalent", "credit_note", "debit_note"]) docType!: string;
   @IsString() prefix!: string;

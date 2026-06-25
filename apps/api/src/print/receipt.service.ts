@@ -1,10 +1,16 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { TaxKind } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { buildEscPosReceipt, ReceiptData } from "./escpos.encoder";
+import { aggregateTaxBreakdown } from "../common/tax.util";
+import { TaxDefinitionService } from "../tax/tax-definition.service";
 
 @Injectable()
 export class ReceiptService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private taxes: TaxDefinitionService,
+  ) {}
 
   private isSimulation() {
     return (process.env.FISCAL_ENV ?? "simulacion") === "simulacion";
@@ -38,6 +44,11 @@ export class ReceiptService {
       ? `${table.area?.name ? `${table.area.name} · ` : ""}Mesa ${table.name}`
       : undefined;
 
+    const taxDefs = await this.taxes.ensureDefaults(company.id);
+    const labelMap = this.taxes.buildLabelMap(taxDefs);
+    const labelFor = (code: string, kind: "iva" | "consumption") =>
+      this.taxes.labelFor(labelMap, kind === "iva" ? TaxKind.iva : TaxKind.consumption, code, code);
+
     return {
       businessName: company.razonSocial ?? company.name,
       nit: `${company.nit}${company.dv ? `-${company.dv}` : ""}`,
@@ -58,6 +69,8 @@ export class ReceiptService {
       })),
       subtotal: Number(invoice.subtotal),
       tax: Number(invoice.tax),
+      consumptionTax: Number(invoice.consumptionTax),
+      taxBreakdown: aggregateTaxBreakdown(invoice.lines, labelFor),
       total: Number(invoice.total) + Number(invoice.tipAmount),
       tip: Number(invoice.tipAmount) || undefined,
       payments: invoice.payments.map((p) => ({
@@ -118,7 +131,19 @@ export class ReceiptService {
   <table>${rows}</table>
   <hr>
   <div>Subtotal: $${d.subtotal.toLocaleString("es-CO")}</div>
-  <div>IVA: $${d.tax.toLocaleString("es-CO")}</div>
+  ${
+    d.taxBreakdown?.length
+      ? d.taxBreakdown
+          .filter((row) => row.tax > 0)
+          .map((row) => `<div>${row.label}: $${row.tax.toLocaleString("es-CO")}</div>`)
+          .join("") +
+        (d.taxBreakdown.filter((r) => r.tax > 0).length > 1
+          ? `<div>Impuestos: $${(d.tax + (d.consumptionTax ?? 0)).toLocaleString("es-CO")}</div>`
+          : "")
+      : `${
+          d.consumptionTax ? `<div>Impoconsumo: $${d.consumptionTax.toLocaleString("es-CO")}</div>` : ""
+        }<div>IVA: $${d.tax.toLocaleString("es-CO")}</div>`
+  }
   ${d.tip ? `<div>Propina: $${d.tip.toLocaleString("es-CO")}</div>` : ""}
   <div class="total">TOTAL: $${d.total.toLocaleString("es-CO")}</div>
   <hr>

@@ -89,7 +89,7 @@ export class FiscalService {
     const fileName = `${fullNumber}.xml`;
 
     const subtotal = Number(invoice.subtotal);
-    const tax = Number(invoice.tax);
+    const tax = Number(invoice.tax) + Number(invoice.consumptionTax);
     const total = Number(invoice.total);
 
     const { xml, cude } = this.xmlBuilder.buildPosEquivalent({

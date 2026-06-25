@@ -84,6 +84,8 @@ export type ReceiptData = {
   lines: ReceiptLine[];
   subtotal: number;
   tax: number;
+  consumptionTax?: number;
+  taxBreakdown?: { label: string; base: number; tax: number }[];
   total: number;
   payments: { method: string; amount: number }[];
   tip?: number;
@@ -125,7 +127,22 @@ export function buildEscPosReceipt(data: ReceiptData, paperWidth = 32): Buffer {
 
   enc.separator("-", paperWidth);
   enc.line(`Subtotal: $${data.subtotal.toLocaleString("es-CO")}`);
-  enc.line(`IVA:      $${data.tax.toLocaleString("es-CO")}`);
+  if (data.taxBreakdown?.length) {
+    for (const row of data.taxBreakdown) {
+      if (row.tax > 0) {
+        enc.line(`${row.label}: $${row.tax.toLocaleString("es-CO")}`);
+      }
+    }
+  } else {
+    if (data.consumptionTax) {
+      enc.line(`Impoconsumo: $${data.consumptionTax.toLocaleString("es-CO")}`);
+    }
+    enc.line(`IVA:      $${data.tax.toLocaleString("es-CO")}`);
+  }
+  const totalTax = data.tax + (data.consumptionTax ?? 0);
+  if (data.taxBreakdown?.length && data.taxBreakdown.filter((r) => r.tax > 0).length > 1) {
+    enc.line(`Impuestos: $${totalTax.toLocaleString("es-CO")}`);
+  }
   if (data.tip) enc.line(`Propina:  $${data.tip.toLocaleString("es-CO")}`);
   enc.bold(true).line(`TOTAL:    $${data.total.toLocaleString("es-CO")}`).bold(false);
 

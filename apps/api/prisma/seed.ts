@@ -5,11 +5,13 @@ import {
   PosSessionStatus,
   BusinessVertical,
   ProductType,
-  TaxType,
   FiscalDocType,
+  TaxKind,
 } from "@prisma/client";
 import { createHash, randomBytes } from "crypto";
-import { PILOT_YALL } from "../src/config/pilot-yall.config";
+import { PILOT_YALL, resolvePilotItemConsumptionTax, resolvePilotItemTax } from "../src/config/pilot-yall.config";
+import { seedPilotIngredientsAndRecipes } from "../src/config/pilot-recipes.util";
+import { COLOMBIA_DEFAULT_TAXES } from "../src/tax/tax-definition.service";
 
 const prisma = new PrismaClient();
 
@@ -81,14 +83,18 @@ async function seedRestaurantBranch(companyId: string, tenantUserId: string) {
       data: { branchId: branch.id, name: group.cat, sortOrder: sortOrder++, color: group.color },
     });
 
-    for (const [name, price, barcode] of group.items) {
+    for (const item of group.items) {
+      const [name, price, barcode] = item;
+      const ivaTaxCode = resolvePilotItemTax(group, item);
+      const consumptionTaxCode = resolvePilotItemConsumptionTax(group, item);
       const product = await prisma.product.create({
         data: {
           branchId: branch.id,
           categoryId: category.id,
           name,
           type: ProductType.standard,
-          taxType: TaxType.iva_19,
+          ivaTaxCode,
+          consumptionTaxCode,
           course: group.course,
           variants: {
             create: {
@@ -107,6 +113,9 @@ async function seedRestaurantBranch(companyId: string, tenantUserId: string) {
       });
     }
   }
+
+  const recipeSeed = await seedPilotIngredientsAndRecipes(prisma, branch.id, warehouse.id);
+  console.log(`   Insumos: ${recipeSeed.ingredientsCreated} · Recetas: ${recipeSeed.recipesLinked}`);
 
   const cashRegister = await prisma.cashRegister.create({
     data: { branchId: branch.id, name: "Caja principal" },
@@ -191,6 +200,20 @@ async function main() {
       city: cfg.company.city,
       department: cfg.company.department,
     },
+  });
+
+  await prisma.taxDefinition.createMany({
+    data: COLOMBIA_DEFAULT_TAXES.map((t) => ({
+      companyId: company.id,
+      kind: t.kind as TaxKind,
+      code: t.code,
+      name: t.name,
+      rate: t.rate,
+      isDefault: t.isDefault,
+      sortOrder: t.sortOrder,
+      isActive: true,
+    })),
+    skipDuplicates: true,
   });
 
   const existingResolution = await prisma.fiscalResolution.findFirst({

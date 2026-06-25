@@ -117,9 +117,9 @@ export const PILOT_YALL = {
       color: "#84cc16",
       items: [
         ["Papas a la francesa", 8000, "7703002401"],
-        ["Arroz blanco", 5000, "7703002402"],
+        ["Arroz blanco", 5000, "7703002402", "iva_5"],
         ["Ensalada mixta", 6000, "7703002403"],
-      ] as [string, number, string][],
+      ] as PilotMenuItem[],
     },
     {
       cat: "Bebidas",
@@ -127,25 +127,26 @@ export const PILOT_YALL = {
       color: "#3b82f6",
       items: [
         ["Gaseosa", 5500, "7703003001"],
-        ["Limonada natural", 9000, "7703003002"],
+        ["Limonada natural", 9000, "7703003002", "iva_5"],
         ["Limonada de coco", 10000, "7703003003"],
-        ["Jugo natural", 8000, "7703003004"],
-        ["Agua", 4000, "7703003005"],
-        ["Café americano", 5000, "7703003006"],
-        ["Cerveza nacional", 8000, "7703003007"],
-        ["Cerveza artesanal", 14000, "7703003008"],
-      ] as [string, number, string][],
+        ["Jugo natural", 8000, "7703003004", "iva_5"],
+        ["Agua", 4000, "7703003005", "iva_5"],
+        ["Café americano", 5000, "7703003006", "iva_5"],
+        ["Cerveza nacional", 8000, "7703003007", "iva_19", "inc_8"],
+        ["Cerveza artesanal", 14000, "7703003008", "iva_19", "inc_8"],
+      ] as PilotMenuItem[],
     },
     {
       cat: "Cocteles",
       course: "drink",
       color: "#6366f1",
+      defaultConsumptionTaxType: "inc_8" as const,
       items: [
         ["Mojito clásico", 22000, "7703003101"],
         ["Margarita", 24000, "7703003102"],
         ["Gin tonic", 26000, "7703003103"],
         ["Cóctel de la casa", 28000, "7703003104"],
-      ] as [string, number, string][],
+      ] as PilotMenuItem[],
     },
     {
       cat: "Postres",
@@ -159,12 +160,90 @@ export const PILOT_YALL = {
       ] as [string, number, string][],
     },
   ],
+  ingredients: {
+    cat: "Insumos (cocina)",
+    course: "main",
+    color: "#64748b",
+    items: [
+      ["Carne molida 150g", 3500, "7703990001"],
+      ["Pan brioche hamburguesa", 1200, "7703990002"],
+      ["Queso cheddar lonja", 800, "7703990003"],
+      ["Lechuga y tomate", 600, "7703990004"],
+      ["Arroz porción", 900, "7703990005"],
+      ["Frijoles porción", 700, "7703990006"],
+      ["Chicharrón porción", 2800, "7703990007"],
+      ["Huevo frito", 500, "7703990008"],
+      ["Plátano maduro", 600, "7703990009"],
+      ["Aguacate porción", 1500, "7703990010"],
+      ["Papa criolla porción", 800, "7703990011"],
+      ["Salmón filete 200g", 12000, "7703990012"],
+      ["Limón y hierbas", 400, "7703990013"],
+      ["Ron 50ml", 2500, "7703990014"],
+      ["Menta y soda", 900, "7703990015"],
+    ] as PilotMenuItem[],
+  },
+  recipes: [
+    {
+      dishBarcode: "7703002002",
+      lines: [
+        ["7703990002", 1],
+        ["7703990001", 1],
+        ["7703990003", 1],
+        ["7703990004", 1],
+      ],
+    },
+    {
+      dishBarcode: "7703002001",
+      lines: [
+        ["7703990001", 1],
+        ["7703990005", 1],
+        ["7703990006", 1],
+        ["7703990007", 1],
+        ["7703990008", 1],
+        ["7703990009", 1],
+        ["7703990010", 1],
+        ["7703990011", 1],
+      ],
+    },
+    {
+      dishBarcode: "7703002005",
+      lines: [
+        ["7703990012", 1],
+        ["7703990013", 1],
+      ],
+    },
+    {
+      dishBarcode: "7703003101",
+      lines: [
+        ["7703990014", 1],
+        ["7703990015", 1],
+      ],
+    },
+  ] as { dishBarcode: string; lines: [string, number][] }[],
 };
 
-export type PilotMenuItem = [name: string, price: number, barcode: string];
+export type PilotTaxType = "iva_19" | "iva_5" | "exento" | "no_gravado";
+export type PilotConsumptionTaxType = "none" | "inc_8" | "inc_4" | "inc_16";
+export type PilotMenuItem = [
+  name: string,
+  price: number,
+  barcode: string,
+  taxType?: PilotTaxType,
+  consumptionTaxType?: PilotConsumptionTaxType,
+];
 export type PilotMenuGroup = {
   cat: string;
   course: string;
   color: string;
+  defaultTaxType?: PilotTaxType;
+  defaultConsumptionTaxType?: PilotConsumptionTaxType;
   items: PilotMenuItem[];
 };
+
+export function resolvePilotItemTax(group: PilotMenuGroup, item: PilotMenuItem): PilotTaxType {
+  return item[3] ?? group.defaultTaxType ?? "iva_19";
+}
+
+export function resolvePilotItemConsumptionTax(group: PilotMenuGroup, item: PilotMenuItem): PilotConsumptionTaxType {
+  return item[4] ?? group.defaultConsumptionTaxType ?? "none";
+}

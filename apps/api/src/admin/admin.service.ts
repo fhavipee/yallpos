@@ -27,17 +27,20 @@ import {
   UpsertKdsStationDto,
   UpsertModifierGroupDto,
   UpsertModifierOptionDto,
+  UpsertTaxDefinitionDto,
+  UpdateTaxDefinitionDto,
   UpsertStaffDto,
   UpsertTableDto,
   UpsertTenantRoleDto,
   UpsertUserDto,
   UpsertWarehouseDto,
 } from "./dto/admin.dto";
-import { BranchType, BusinessVertical, FiscalDocType, StaffRole, UserRole } from "@prisma/client";
+import { BranchType, BusinessVertical, FiscalDocType, StaffRole, TaxKind, UserRole } from "@prisma/client";
 import * as fs from "fs";
 import * as path from "path";
 import { DianCertificateService } from "../fiscal/dian-certificate.service";
 import { OnboardingService } from "../onboarding/onboarding.service";
+import { TaxDefinitionService } from "../tax/tax-definition.service";
 
 @Injectable()
 export class AdminService {
@@ -48,6 +51,7 @@ export class AdminService {
     private audit: AuditService,
     private certService: DianCertificateService,
     private onboarding: OnboardingService,
+    private taxes: TaxDefinitionService,
   ) {}
 
   private async branchContext(branchId: string, tenantId: string) {
@@ -185,6 +189,8 @@ export class AdminService {
     if (Object.keys(patch).length) {
       await this.saveBranchSettings(user.tenantId, branchId, patch, user.id);
     }
+
+    await this.taxes.ensureDefaults(branch.companyId);
 
     return this.getSetupStatus(branchId, user);
   }
@@ -1003,5 +1009,139 @@ export class AdminService {
     const result = await this.onboarding.stepCatalog({ branchId, template });
     await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "update", entity: "onboarding_catalog", branchId, payload: { template } });
     return result;
+  }
+
+  async listTaxes(branchId: string, user: AuthUser) {
+    const branch = await this.branchContext(branchId, user.tenantId);
+    return this.taxes.ensureDefaults(branch.companyId);
+  }
+
+  async createTax(branchId: string, user: AuthUser, dto: UpsertTaxDefinitionDto) {
+    const branch = await this.branchContext(branchId, user.tenantId);
+    const code = dto.code.trim().toLowerCase().replace(/\s+/g, "_");
+    if (!/^[a-z0-9_]+$/.test(code)) {
+      throw new BadRequestException("Código inválido — use letras, números y guión bajo");
+    }
+    if (dto.rate < 0 || dto.rate > 1) {
+      throw new BadRequestException("La tarifa debe estar entre 0 y 1 (ej. 0.19 = 19%)");
+    }
+
+    const existing = await this.prisma.taxDefinition.findUnique({
+      where: { companyId_code: { companyId: branch.companyId, code } },
+    });
+    if (existing) throw new BadRequestException("Ya existe un impuesto con ese código");
+
+    if (dto.isDefault) {
+      await this.taxes.clearDefaultForKind(branch.companyId, dto.kind as TaxKind);
+    }
+
+    const created = await this.prisma.taxDefinition.create({
+      data: {
+        companyId: branch.companyId,
+        kind: dto.kind as TaxKind,
+        code,
+        name: dto.name.trim(),
+        rate: dto.rate,
+        isDefault: dto.isDefault ?? false,
+        isActive: dto.isActive ?? true,
+        sortOrder: dto.sortOrder ?? 99,
+      },
+    });
+
+    await this.audit.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: "create",
+      entity: "tax_definition",
+      entityId: created.id,
+      branchId,
+      payload: dto,
+    });
+    return created;
+  }
+
+  async updateTax(branchId: string, user: AuthUser, id: string, dto: UpdateTaxDefinitionDto) {
+    const branch = await this.branchContext(branchId, user.tenantId);
+    const tax = await this.prisma.taxDefinition.findFirst({ where: { id, companyId: branch.companyId } });
+    if (!tax) throw new NotFoundException("Impuesto no encontrado");
+
+    if (dto.rate !== undefined && (dto.rate < 0 || dto.rate > 1)) {
+      throw new BadRequestException("La tarifa debe estar entre 0 y 1");
+    }
+
+    if (dto.isDefault) {
+      await this.taxes.clearDefaultForKind(branch.companyId, tax.kind, id);
+    }
+
+    const updated = await this.prisma.taxDefinition.update({
+      where: { id },
+      data: {
+        name: dto.name?.trim() ?? tax.name,
+        rate: dto.rate ?? tax.rate,
+        isDefault: dto.isDefault ?? tax.isDefault,
+        isActive: dto.isActive ?? tax.isActive,
+        sortOrder: dto.sortOrder ?? tax.sortOrder,
+      },
+    });
+
+    await this.audit.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: "update",
+      entity: "tax_definition",
+      entityId: id,
+      branchId,
+      payload: dto,
+    });
+    return updated;
+  }
+
+  async deleteTax(branchId: string, user: AuthUser, id: string) {
+    const branch = await this.branchContext(branchId, user.tenantId);
+    const tax = await this.prisma.taxDefinition.findFirst({ where: { id, companyId: branch.companyId } });
+    if (!tax) throw new NotFoundException("Impuesto no encontrado");
+
+    const usage = await this.taxes.countProductUsage(branch.companyId, tax.code, tax.kind);
+    if (usage > 0) {
+      throw new BadRequestException(`No se puede desactivar: ${usage} producto(s) usan este impuesto`);
+    }
+
+    const updated = await this.prisma.taxDefinition.update({
+      where: { id },
+      data: { isActive: false, isDefault: false },
+    });
+
+    if (tax.isDefault) {
+      const fallback = await this.prisma.taxDefinition.findFirst({
+        where: { companyId: branch.companyId, kind: tax.kind, isActive: true, id: { not: id } },
+        orderBy: { sortOrder: "asc" },
+      });
+      if (fallback) {
+        await this.prisma.taxDefinition.update({ where: { id: fallback.id }, data: { isDefault: true } });
+      }
+    }
+
+    await this.audit.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: "delete",
+      entity: "tax_definition",
+      entityId: id,
+      branchId,
+    });
+    return updated;
+  }
+
+  async seedTaxDefaults(branchId: string, user: AuthUser) {
+    const branch = await this.branchContext(branchId, user.tenantId);
+    const result = await this.taxes.seedDefaults(branch.companyId);
+    await this.audit.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: "update",
+      entity: "tax_definition_seed",
+      branchId,
+    });
+    return { count: result.length, taxes: result };
   }
 }

@@ -1,12 +1,22 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
+import { TaxDefinitionService } from "../tax/tax-definition.service";
 import { CreateProductDto } from "./dto/create-product.dto";
 import { CreateCategoryDto } from "./dto/update-product.dto";
 import { UpdateProductDto } from "./dto/update-product.dto";
 
 @Injectable()
 export class CatalogService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private taxes: TaxDefinitionService,
+  ) {}
+
+  async getTaxes(branchId: string) {
+    const companyId = await this.taxes.getCompanyIdFromBranch(branchId);
+    const list = await this.taxes.ensureDefaults(companyId);
+    return list.filter((t) => t.isActive);
+  }
 
   async getCategories(branchId: string) {
     return this.prisma.category.findMany({
@@ -31,11 +41,19 @@ export class CatalogService {
     });
   }
 
-  async getProducts(branchId: string, categoryId?: string, search?: string, includeInactive = false) {
+  async getProducts(
+    branchId: string,
+    categoryId?: string,
+    search?: string,
+    includeInactive = false,
+    ingredientsOnly = false,
+    includeIngredients = false,
+  ) {
     return this.prisma.product.findMany({
       where: {
         branchId,
         ...(includeInactive ? {} : { isActive: true }),
+        ...(ingredientsOnly ? { isIngredient: true } : includeIngredients ? {} : { isIngredient: false }),
         ...(categoryId ? { categoryId } : {}),
         ...(search ? { name: { contains: search, mode: "insensitive" } } : {}),
       },
@@ -43,6 +61,12 @@ export class CatalogService {
       include: {
         category: true,
         variants: true,
+        recipeLines: {
+          orderBy: { sortOrder: "asc" },
+          include: {
+            ingredientVariant: { include: { product: { include: { category: true } } } },
+          },
+        },
         modifierGroups: {
           include: {
             modifierGroup: { include: { options: { where: { isActive: true } } } },
@@ -50,6 +74,95 @@ export class CatalogService {
         },
       },
     });
+  }
+
+  async getIngredients(branchId: string, search?: string) {
+    return this.getProducts(branchId, undefined, search, true, true, true);
+  }
+
+  async getProductRecipe(branchId: string, productId: string) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, branchId },
+      include: {
+        variants: true,
+        recipeLines: {
+          orderBy: { sortOrder: "asc" },
+          include: {
+            ingredientVariant: { include: { product: true } },
+          },
+        },
+      },
+    });
+    if (!product) throw new NotFoundException("Producto no encontrado");
+    const recipeCost = this.sumRecipeCost(product.recipeLines);
+    return { product, recipeCost };
+  }
+
+  async setProductRecipe(branchId: string, productId: string, lines: { ingredientVariantId: string; quantity: number; unit?: string; notes?: string }[]) {
+    const product = await this.prisma.product.findFirst({
+      where: { id: productId, branchId },
+      include: { variants: true },
+    });
+    if (!product) throw new NotFoundException("Producto no encontrado");
+    if (product.isIngredient) throw new BadRequestException("Un insumo no puede tener receta propia");
+
+    const variantIds = [...new Set(lines.map((l) => l.ingredientVariantId))];
+    if (variantIds.length !== lines.length) {
+      throw new BadRequestException("Ingrediente duplicado en la receta");
+    }
+
+    const ingredients = await this.prisma.productVariant.findMany({
+      where: { id: { in: variantIds }, product: { branchId } },
+      include: { product: true },
+    });
+    if (ingredients.length !== variantIds.length) {
+      throw new BadRequestException("Uno o más ingredientes no son válidos");
+    }
+
+    const ownVariantIds = new Set(product.variants.map((v) => v.id));
+    if (lines.some((l) => ownVariantIds.has(l.ingredientVariantId))) {
+      throw new BadRequestException("Un producto no puede incluirse a sí mismo como ingrediente");
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.productRecipeLine.deleteMany({ where: { productId } });
+      if (lines.length) {
+        await tx.productRecipeLine.createMany({
+          data: lines.map((line, i) => ({
+            productId,
+            ingredientVariantId: line.ingredientVariantId,
+            quantity: line.quantity,
+            unit: line.unit ?? ingredients.find((v) => v.id === line.ingredientVariantId)?.unit ?? "und",
+            notes: line.notes ?? null,
+            sortOrder: i,
+          })),
+        });
+      }
+
+      const recipeLines = await tx.productRecipeLine.findMany({
+        where: { productId },
+        include: { ingredientVariant: true },
+      });
+      const recipeCost = this.sumRecipeCost(recipeLines);
+      if (product.variants[0] && recipeCost > 0) {
+        await tx.productVariant.update({
+          where: { id: product.variants[0].id },
+          data: { cost: recipeCost },
+        });
+      }
+
+      if (lines.length > 0 && product.type !== "recipe" && product.type !== "combo") {
+        await tx.product.update({ where: { id: productId }, data: { type: "recipe" } });
+      }
+    });
+
+    return this.getProductRecipe(branchId, productId);
+  }
+
+  private sumRecipeCost(lines: { quantity: unknown; ingredientVariant: { cost: unknown } }[]) {
+    return Math.round(
+      lines.reduce((sum, line) => sum + Number(line.quantity) * Number(line.ingredientVariant.cost), 0),
+    );
   }
 
   async getProductByBarcode(branchId: string, barcode: string) {
@@ -71,6 +184,10 @@ export class CatalogService {
 
   async createProduct(branchId: string, dto: CreateProductDto) {
     const warehouse = await this.prisma.warehouse.findFirst({ where: { branchId, isDefault: true } });
+    const companyId = await this.taxes.getCompanyIdFromBranch(branchId);
+    const ivaTaxCode = dto.ivaTaxCode ?? dto.taxType ?? "iva_19";
+    const consumptionTaxCode = dto.consumptionTaxCode ?? dto.consumptionTaxType ?? "none";
+    await this.taxes.validateProductTaxCodes(companyId, ivaTaxCode, consumptionTaxCode);
 
     const product = await this.prisma.product.create({
       data: {
@@ -79,7 +196,9 @@ export class CatalogService {
         name: dto.name,
         description: dto.description ?? null,
         type: dto.type ?? "standard",
-        taxType: dto.taxType ?? "iva_19",
+        isIngredient: dto.isIngredient ?? false,
+        ivaTaxCode,
+        consumptionTaxCode,
         course: dto.course ?? null,
         variants: {
           create: {
@@ -96,7 +215,7 @@ export class CatalogService {
       include: { variants: true },
     });
 
-    if (warehouse && product.variants[0]) {
+    if (warehouse && product.variants[0] && !product.isIngredient && product.type !== "recipe") {
       await this.prisma.stockLevel.create({
         data: { warehouseId: warehouse.id, variantId: product.variants[0].id, quantity: 100 },
       });
@@ -112,6 +231,17 @@ export class CatalogService {
     });
     if (!product) throw new NotFoundException("Producto no encontrado");
 
+    const companyId = await this.taxes.getCompanyIdFromBranch(branchId);
+    const ivaTaxCode = dto.ivaTaxCode ?? dto.taxType;
+    const consumptionTaxCode = dto.consumptionTaxCode ?? dto.consumptionTaxType;
+    if (ivaTaxCode != null || consumptionTaxCode != null) {
+      await this.taxes.validateProductTaxCodes(
+        companyId,
+        ivaTaxCode ?? product.ivaTaxCode,
+        consumptionTaxCode ?? product.consumptionTaxCode,
+      );
+    }
+
     const updated = await this.prisma.product.update({
       where: { id: productId },
       data: {
@@ -119,7 +249,10 @@ export class CatalogService {
         categoryId: dto.categoryId !== undefined ? dto.categoryId : product.categoryId,
         course: dto.course !== undefined ? dto.course : product.course,
         isActive: dto.isActive ?? product.isActive,
-        taxType: dto.taxType as any ?? product.taxType,
+        type: (dto.type as any) ?? product.type,
+        isIngredient: dto.isIngredient ?? product.isIngredient,
+        ivaTaxCode: ivaTaxCode ?? product.ivaTaxCode,
+        consumptionTaxCode: consumptionTaxCode ?? product.consumptionTaxCode,
         description: dto.description !== undefined ? dto.description : product.description,
       },
       include: { variants: true, category: true },

@@ -16,13 +16,8 @@ import {
   buildTableReadyWaiterWhatsAppLink,
 } from "../restaurant/reservation-notify.util";
 import { readBranchNotificationSettings } from "../settings/branch-notifications.util";
-
-const TAX_RATES: Record<string, number> = {
-  iva_19: 0.19,
-  iva_5: 0.05,
-  exento: 0,
-  no_gravado: 0,
-};
+import { calcLineAmountsFromRates } from "../common/tax.util";
+import { TaxDefinitionService } from "../tax/tax-definition.service";
 
 @Injectable()
 export class PosService {
@@ -31,6 +26,7 @@ export class PosService {
     private kds: KdsService,
     private fiscal: FiscalService,
     private orderNotify: OrderNotifyService,
+    private taxes: TaxDefinitionService,
   ) {}
 
   private async getBranchNotificationSettings(branchId: string) {
@@ -407,11 +403,15 @@ export class PosService {
     const unitNum = Number(dto.unitPrice);
     const modifiers = dto.modifiers ?? [];
     const modifiersTotal = modifiers.reduce((s, m) => s + Number(m.priceDelta ?? "0"), 0);
-
-    const lineSubtotal = qtyNum * unitNum + modifiersTotal;
-    const taxRate = variant ? TAX_RATES[variant.product.taxType] ?? 0.19 : 0.19;
-    const lineTax = lineSubtotal * taxRate;
-    const lineTotal = lineSubtotal + lineTax;
+    const grossAmount = qtyNum * unitNum + modifiersTotal;
+    const ivaTaxCode = variant?.product.ivaTaxCode ?? "iva_19";
+    const consumptionTaxCode = variant?.product.consumptionTaxCode ?? "none";
+    const resolved = await this.taxes.resolveRates(invoice.companyId, ivaTaxCode, consumptionTaxCode);
+    const { lineSubtotal, lineConsumptionTax, lineTax, lineTotal } = calcLineAmountsFromRates(
+      grossAmount,
+      resolved.ivaRate,
+      resolved.consumptionRate,
+    );
 
     const line = await this.prisma.salesInvoiceLine.create({
       data: {
@@ -423,7 +423,12 @@ export class PosService {
         unitPrice: dto.unitPrice,
         weight: dto.weight ?? null,
         lineNotes: dto.lineNotes ?? null,
+        ivaTaxCode,
+        consumptionTaxCode,
+        ivaRateSnapshot: resolved.ivaRate,
+        consumptionRateSnapshot: resolved.consumptionRate,
         lineSubtotal: String(lineSubtotal),
+        lineConsumptionTax: String(lineConsumptionTax),
         lineTax: String(lineTax),
         lineTotal: String(lineTotal),
         modifiers: {
@@ -992,16 +997,26 @@ export class PosService {
 
     const modifiersTotal = line.modifiers.reduce((sum, mod) => sum + Number(mod.priceDeltaSnapshot ?? "0"), 0);
     const unitNum = Number(line.unitPrice);
-    const lineSubtotal = qtyNum * unitNum + modifiersTotal;
-    const taxRate = Number(line.lineSubtotal) > 0 ? Number(line.lineTax) / Number(line.lineSubtotal) : 0.19;
-    const lineTax = lineSubtotal * taxRate;
-    const lineTotal = lineSubtotal + lineTax;
+    const grossAmount = qtyNum * unitNum + modifiersTotal;
+    let ivaRate = line.ivaRateSnapshot != null ? Number(line.ivaRateSnapshot) : undefined;
+    let consumptionRate = line.consumptionRateSnapshot != null ? Number(line.consumptionRateSnapshot) : undefined;
+    if (ivaRate == null || consumptionRate == null) {
+      const resolved = await this.taxes.resolveRates(invoice.companyId, line.ivaTaxCode, line.consumptionTaxCode);
+      ivaRate = ivaRate ?? resolved.ivaRate;
+      consumptionRate = consumptionRate ?? resolved.consumptionRate;
+    }
+    const { lineSubtotal, lineConsumptionTax, lineTax, lineTotal } = calcLineAmountsFromRates(
+      grossAmount,
+      ivaRate,
+      consumptionRate,
+    );
 
     await this.prisma.salesInvoiceLine.update({
       where: { id: lineId },
       data: {
         qty,
         lineSubtotal: String(lineSubtotal),
+        lineConsumptionTax: String(lineConsumptionTax),
         lineTax: String(lineTax),
         lineTotal: String(lineTotal),
       },
@@ -1204,38 +1219,84 @@ export class PosService {
     if (!warehouse) return;
 
     for (const line of lines) {
-      const stock = await tx.stockLevel.findUnique({
-        where: { warehouseId_variantId: { warehouseId: warehouse.id, variantId: line.variantId } },
-      });
-      if (!stock) continue;
-
-      const qty = Number(line.qty);
-      await tx.stockLevel.update({
-        where: { id: stock.id },
-        data: { quantity: { decrement: qty } },
-      });
-
-      await tx.stockMovement.create({
-        data: {
-          warehouseId: warehouse.id,
-          variantId: line.variantId,
-          type: "sale",
-          quantity: qty,
-          reference: line.invoiceId,
+      const variant = await tx.productVariant.findUnique({
+        where: { id: line.variantId },
+        include: {
+          product: {
+            include: {
+              recipeLines: { orderBy: { sortOrder: "asc" } },
+            },
+          },
         },
       });
+      if (!variant) continue;
+
+      const soldQty = Number(line.qty);
+      if (variant.product.recipeLines.length > 0) {
+        for (const recipeLine of variant.product.recipeLines) {
+          const deductQty = Number(recipeLine.quantity) * soldQty;
+          await this.adjustStockLevel(
+            tx,
+            warehouse.id,
+            recipeLine.ingredientVariantId,
+            deductQty,
+            line.invoiceId,
+            "sale",
+          );
+        }
+        continue;
+      }
+
+      if (variant.product.isIngredient) continue;
+
+      await this.adjustStockLevel(tx, warehouse.id, line.variantId, soldQty, line.invoiceId, "sale");
     }
+  }
+
+  private async adjustStockLevel(
+    tx: any,
+    warehouseId: string,
+    variantId: string,
+    qty: number,
+    reference: string,
+    type: "sale" | "production",
+  ) {
+    const stock = await tx.stockLevel.findUnique({
+      where: { warehouseId_variantId: { warehouseId, variantId } },
+    });
+    if (!stock) return;
+
+    await tx.stockLevel.update({
+      where: { id: stock.id },
+      data: { quantity: { decrement: qty } },
+    });
+
+    await tx.stockMovement.create({
+      data: {
+        warehouseId,
+        variantId,
+        type,
+        quantity: qty,
+        reference,
+      },
+    });
   }
 
   private async recalcInvoiceTotals(invoiceId: string) {
     const lines = await this.prisma.salesInvoiceLine.findMany({ where: { invoiceId } });
     const subtotal = lines.reduce((sum: number, l: any) => sum + Number(l.lineSubtotal), 0);
+    const consumptionTax = lines.reduce((sum: number, l: any) => sum + Number(l.lineConsumptionTax), 0);
     const tax = lines.reduce((sum: number, l: any) => sum + Number(l.lineTax), 0);
     const total = lines.reduce((sum: number, l: any) => sum + Number(l.lineTotal), 0);
 
     await this.prisma.salesInvoice.update({
       where: { id: invoiceId },
-      data: { subtotal: String(subtotal), tax: String(tax), total: String(total) },
+      data: {
+        subtotal: String(subtotal),
+        consumptionTax: String(consumptionTax),
+        tax: String(tax),
+        total: String(total),
+      },
     });
   }
 }

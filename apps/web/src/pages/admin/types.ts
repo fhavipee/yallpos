@@ -4,6 +4,7 @@ export type AdminTab =
   | "company"
   | "categories"
   | "products"
+  | "taxes"
   | "daily-menu"
   | "floor"
   | "staff"
@@ -38,6 +39,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     tabs: [
       { id: "categories", label: "Categorías", desc: "Organización del menú" },
       { id: "products", label: "Productos", desc: "Precios, IVA, barcode" },
+      { id: "taxes", label: "Impuestos", desc: "IVA e impoconsumo" },
       { id: "modifiers", label: "Modificadores", desc: "Extras y opciones" },
       { id: "daily-menu", label: "Menú del día", desc: "Publicación diaria" },
     ],
@@ -143,6 +145,13 @@ export const PAYMENT_METHODS = [
   { value: "credit", label: "Crédito" },
   { value: "voucher", label: "Voucher" },
   { value: "mixed", label: "Mixto" },
+];
+
+export const CONSUMPTION_TAX_TYPES = [
+  { value: "none", label: "Sin impoconsumo" },
+  { value: "inc_8", label: "Impoconsumo 8%" },
+  { value: "inc_4", label: "Impoconsumo 4%" },
+  { value: "inc_16", label: "Impoconsumo 16%" },
 ];
 
 export const TAX_TYPES = [

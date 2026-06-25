@@ -21,6 +21,8 @@ import {
   UpsertKdsStationDto,
   UpsertModifierGroupDto,
   UpsertModifierOptionDto,
+  UpsertTaxDefinitionDto,
+  UpdateTaxDefinitionDto,
   UpsertStaffDto,
   UpsertTableDto,
   UpsertTenantRoleDto,
@@ -393,6 +395,36 @@ export class AdminController {
   @Delete("modifier-options/:id")
   deleteModifierOption(@BranchId() branchId: string, @CurrentUser() user: AuthUser, @Param("id") id: string) {
     return this.admin.deleteModifierOption(branchId, user, id);
+  }
+
+  @Get("taxes")
+  listTaxes(@BranchId() branchId: string, @CurrentUser() user: AuthUser) {
+    return this.admin.listTaxes(branchId, user);
+  }
+
+  @Post("taxes")
+  createTax(@BranchId() branchId: string, @CurrentUser() user: AuthUser, @Body() dto: UpsertTaxDefinitionDto) {
+    return this.admin.createTax(branchId, user, dto);
+  }
+
+  @Patch("taxes/:id")
+  updateTax(
+    @BranchId() branchId: string,
+    @CurrentUser() user: AuthUser,
+    @Param("id") id: string,
+    @Body() dto: UpdateTaxDefinitionDto,
+  ) {
+    return this.admin.updateTax(branchId, user, id, dto);
+  }
+
+  @Delete("taxes/:id")
+  deleteTax(@BranchId() branchId: string, @CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.admin.deleteTax(branchId, user, id);
+  }
+
+  @Post("taxes/seed-defaults")
+  seedTaxDefaults(@BranchId() branchId: string, @CurrentUser() user: AuthUser) {
+    return this.admin.seedTaxDefaults(branchId, user);
   }
 
   @Get("audit-log")

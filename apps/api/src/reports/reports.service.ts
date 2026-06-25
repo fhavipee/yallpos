@@ -117,7 +117,7 @@ export class ReportsService {
     });
 
     const totalSales = paidInvoices.reduce((s, i) => s + Number(i.total), 0);
-    const totalTax = paidInvoices.reduce((s, i) => s + Number(i.tax), 0);
+    const totalTax = paidInvoices.reduce((s, i) => s + Number(i.tax) + Number(i.consumptionTax), 0);
     const totalTips = paidInvoices.reduce((s, i) => s + Number(i.tipAmount), 0);
     const ticketAvg = paidInvoices.length ? totalSales / paidInvoices.length : 0;
 

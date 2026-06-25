@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { BranchId } from "../common/decorators/branch-id.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { FLOOR_ROLES, MANAGEMENT_ROLES } from "../auth/auth.types";
 import { CatalogService } from "./catalog.service";
 import { CreateProductDto } from "./dto/create-product.dto";
 import { CreateCategoryDto, UpdateProductDto } from "./dto/update-product.dto";
+import { SetProductRecipeDto } from "./dto/recipe.dto";
 
 @Controller("v1/catalog")
 export class CatalogController {
@@ -14,6 +15,12 @@ export class CatalogController {
   @Get("categories")
   getCategories(@BranchId() branchId: string) {
     return this.catalog.getCategories(branchId);
+  }
+
+  @Roles(...FLOOR_ROLES)
+  @Get("taxes")
+  getTaxes(@BranchId() branchId: string) {
+    return this.catalog.getTaxes(branchId);
   }
 
   @Roles(...MANAGEMENT_ROLES)
@@ -29,8 +36,31 @@ export class CatalogController {
     @Query("categoryId") categoryId?: string,
     @Query("search") search?: string,
     @Query("all") all?: string,
+    @Query("ingredients") ingredients?: string,
   ) {
-    return this.catalog.getProducts(branchId, categoryId, search, all === "1");
+    if (ingredients === "1") {
+      return this.catalog.getIngredients(branchId, search);
+    }
+    return this.catalog.getProducts(
+      branchId,
+      categoryId,
+      search,
+      all === "1",
+      false,
+      all === "1",
+    );
+  }
+
+  @Roles(...MANAGEMENT_ROLES)
+  @Get("products/:id/recipe")
+  getProductRecipe(@BranchId() branchId: string, @Param("id") id: string) {
+    return this.catalog.getProductRecipe(branchId, id);
+  }
+
+  @Roles(...MANAGEMENT_ROLES)
+  @Put("products/:id/recipe")
+  setProductRecipe(@BranchId() branchId: string, @Param("id") id: string, @Body() dto: SetProductRecipeDto) {
+    return this.catalog.setProductRecipe(branchId, id, dto.lines);
   }
 
   @Roles(...FLOOR_ROLES)

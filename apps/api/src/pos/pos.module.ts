@@ -4,9 +4,11 @@ import { PosService } from "./pos.service";
 import { KdsModule } from "../kds/kds.module";
 import { FiscalModule } from "../fiscal/fiscal.module";
 import { NotificationsModule } from "../notifications/notifications.module";
+import { TaxModule } from "../tax/tax.module";
+import { PrismaModule } from "../prisma/prisma.module";
 
 @Module({
-  imports: [KdsModule, FiscalModule, NotificationsModule],
+  imports: [PrismaModule, KdsModule, FiscalModule, NotificationsModule, TaxModule],
   controllers: [PosController],
   providers: [PosService],
   exports: [PosService],

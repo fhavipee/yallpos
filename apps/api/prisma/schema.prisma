@@ -114,6 +114,7 @@ model Company {
   tenant   Tenant   @relation(fields: [tenantId], references: [id])
   branches Branch[]
   fiscalResolutions FiscalResolution[]
+  taxDefinitions  TaxDefinition[]
 
   @@unique([tenantId, name])
 }
@@ -172,11 +173,28 @@ enum ProductType {
   weight_based
 }
 
-enum TaxType {
-  iva_19
-  iva_5
-  exento
-  no_gravado
+enum TaxKind {
+  iva
+  consumption
+}
+
+model TaxDefinition {
+  id        String   @id @default(uuid())
+  companyId String
+  kind      TaxKind
+  code      String
+  name      String
+  rate      Decimal
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, code])
+  @@index([companyId, kind, isActive])
 }
 
 model Category {
@@ -204,8 +222,10 @@ model Product {
   name        String
   description String?
   type        ProductType @default(standard)
-  taxType     TaxType     @default(iva_19)
-  isActive    Boolean     @default(true)
+  isIngredient Boolean    @default(false)
+  ivaTaxCode         String      @default("iva_19")
+  consumptionTaxCode String      @default("none")
+  isActive            Boolean             @default(true)
   imageUrl    String?
   course      String?     // appetizer|main|drink|dessert|bakery
   createdAt   DateTime    @default(now())
@@ -213,8 +233,25 @@ model Product {
   category       Category?           @relation(fields: [categoryId], references: [id])
   variants       ProductVariant[]
   modifierGroups ProductModifierGroup[]
+  recipeLines    ProductRecipeLine[] @relation("ProductRecipe")
 
   @@index([branchId, categoryId])
+}
+
+model ProductRecipeLine {
+  id                  String  @id @default(uuid())
+  productId           String
+  ingredientVariantId String
+  quantity            Decimal
+  unit                String  @default("und")
+  notes               String?
+  sortOrder           Int     @default(0)
+
+  product           Product        @relation("ProductRecipe", fields: [productId], references: [id], onDelete: Cascade)
+  ingredientVariant ProductVariant @relation("IngredientInRecipe", fields: [ingredientVariantId], references: [id])
+
+  @@unique([productId, ingredientVariantId])
+  @@index([productId])
 }
 
 model ProductVariant {
@@ -231,6 +268,7 @@ model ProductVariant {
 
   product Product @relation(fields: [productId], references: [id])
   stockLevels StockLevel[]
+  usedInRecipes ProductRecipeLine[] @relation("IngredientInRecipe")
 
   @@index([productId])
   @@index([barcode])
@@ -532,10 +570,11 @@ model SalesInvoice {
   tipAmount    Decimal @default(0)
   printedCount Int     @default(0)
 
-  subtotal Decimal @default(0)
-  discount Decimal @default(0)
-  tax      Decimal @default(0)
-  total    Decimal @default(0)
+  subtotal       Decimal @default(0)
+  discount       Decimal @default(0)
+  consumptionTax Decimal @default(0)
+  tax            Decimal @default(0)
+  total          Decimal @default(0)
 
   createdAt DateTime @default(now())
   paidAt    DateTime?
@@ -564,10 +603,15 @@ model SalesInvoiceLine {
   weight       Decimal? // para venta por peso (panadería)
 
   lineNotes    String?
-  lineSubtotal Decimal @default(0)
-  lineDiscount Decimal @default(0)
-  lineTax      Decimal @default(0)
-  lineTotal    Decimal @default(0)
+  ivaTaxCode              String   @default("iva_19")
+  consumptionTaxCode      String   @default("none")
+  ivaRateSnapshot         Decimal?
+  consumptionRateSnapshot Decimal?
+  lineSubtotal            Decimal  @default(0)
+  lineDiscount            Decimal  @default(0)
+  lineConsumptionTax      Decimal  @default(0)
+  lineTax                 Decimal  @default(0)
+  lineTotal               Decimal  @default(0)
 
   invoice   SalesInvoice        @relation(fields: [invoiceId], references: [id])
   modifiers SalesLineModifier[]

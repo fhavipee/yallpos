@@ -16,19 +16,39 @@ import {
   ReloadButton,
   adminStyles,
 } from "../components/AdminUi";
-import { COURSES, PRODUCT_TYPES, PRODUCT_UNITS, TAX_TYPES } from "../types";
+import { COURSES, PRODUCT_TYPES, PRODUCT_UNITS } from "../types";
+
+type TaxDef = { kind: string; code: string; name: string; rate: string };
 
 type Product = {
   id: string;
   name: string;
   description?: string;
   type: string;
-  taxType: string;
+  isIngredient?: boolean;
+  ivaTaxCode?: string;
+  consumptionTaxCode?: string;
+  taxType?: string;
+  consumptionTaxType?: string;
   course?: string;
   isActive: boolean;
   category?: { id: string; name: string };
   variants: { id: string; price: string; cost: string; barcode?: string; sku?: string; name: string; sellByWeight?: boolean; unit?: string }[];
+  recipeLines?: {
+    id: string;
+    quantity: string;
+    unit: string;
+    ingredientVariant: { id: string; name: string; cost: string; unit: string; product: { name: string } };
+  }[];
 };
+
+type IngredientProduct = {
+  id: string;
+  name: string;
+  variants: { id: string; name: string; unit: string; cost: string }[];
+};
+
+type RecipeLineForm = { ingredientVariantId: string; quantity: string; unit: string; label: string };
 
 type Category = { id: string; name: string };
 
@@ -38,6 +58,7 @@ const emptyForm = () => ({
   categoryId: "",
   type: "standard",
   taxType: "iva_19",
+  consumptionTaxType: "none",
   course: "main",
   price: "",
   cost: "",
@@ -52,29 +73,106 @@ export default function AdminProductsView() {
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [modal, setModal] = useState<"new" | Product | null>(null);
+  const [recipeModal, setRecipeModal] = useState<Product | null>(null);
+  const [recipeLines, setRecipeLines] = useState<RecipeLineForm[]>([]);
+  const [ingredientSearch, setIngredientSearch] = useState("");
+  const [recipeSaving, setRecipeSaving] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
 
   const { data, loading, error, reload } = useAdminResource(async () => {
-    const [p, c] = await Promise.all([
+    const [p, c, t, ing] = await Promise.all([
       api.get("/v1/catalog/products", { params: { all: "1" } }),
       api.get("/v1/catalog/categories"),
+      api.get("/v1/catalog/taxes"),
+      api.get("/v1/catalog/products", { params: { ingredients: "1", all: "1" } }),
     ]);
-    return { products: p.data as Product[], categories: c.data as Category[] };
+    return {
+      products: p.data as Product[],
+      categories: c.data as Category[],
+      taxes: t.data as TaxDef[],
+      ingredients: ing.data as IngredientProduct[],
+    };
   }, []);
 
   const products = data?.products ?? [];
   const categories = data?.categories ?? [];
+  const taxes = data?.taxes ?? [];
+  const ingredients = data?.ingredients ?? [];
+  const ivaOptions = taxes.filter((t) => t.kind === "iva");
+  const consumptionOptions = taxes.filter((t) => t.kind === "consumption");
+
+  const productIva = (p: Product) => p.ivaTaxCode ?? p.taxType ?? "iva_19";
+  const productInc = (p: Product) => p.consumptionTaxCode ?? p.consumptionTaxType ?? "none";
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return products.filter((p) => {
+      if (p.isIngredient) return false;
       if (categoryFilter && p.category?.id !== categoryFilter) return false;
       return !q || p.name.toLowerCase().includes(q) || p.variants[0]?.barcode?.includes(q) || p.variants[0]?.sku?.toLowerCase().includes(q);
     });
   }, [products, search, categoryFilter]);
 
-  const taxLabel = (v: string) => TAX_TYPES.find((t) => t.value === v)?.label ?? v;
+  const ingredientOptions = useMemo(() => {
+    const q = ingredientSearch.toLowerCase();
+    return ingredients.flatMap((p) =>
+      p.variants.map((v) => ({
+        variantId: v.id,
+        label: `${p.name}${v.name !== p.name ? ` · ${v.name}` : ""}`,
+        unit: v.unit,
+      })),
+    ).filter((o) => !q || o.label.toLowerCase().includes(q));
+  }, [ingredients, ingredientSearch]);
+
+  function openRecipeModal(product: Product) {
+    setRecipeModal(product);
+    setIngredientSearch("");
+    setRecipeLines(
+      (product.recipeLines ?? []).map((line) => ({
+        ingredientVariantId: line.ingredientVariant.id,
+        quantity: String(line.quantity),
+        unit: line.unit || line.ingredientVariant.unit || "und",
+        label: line.ingredientVariant.product?.name ?? line.ingredientVariant.name,
+      })),
+    );
+  }
+
+  function addRecipeLine(variantId: string, label: string, unit: string) {
+    if (recipeLines.some((l) => l.ingredientVariantId === variantId)) return;
+    setRecipeLines([...recipeLines, { ingredientVariantId: variantId, quantity: "1", unit, label }]);
+    setIngredientSearch("");
+  }
+
+  async function saveRecipe() {
+    if (!recipeModal) return;
+    setRecipeSaving(true);
+    await runAction(async () => {
+      await api.put(`/v1/catalog/products/${recipeModal.id}/recipe`, {
+        lines: recipeLines.map((l) => ({
+          ingredientVariantId: l.ingredientVariantId,
+          quantity: Number(l.quantity),
+          unit: l.unit,
+        })),
+      });
+      setRecipeModal(null);
+      await reload();
+    }, "Receta guardada");
+    setRecipeSaving(false);
+  }
+
+  const recipeCostPreview = useMemo(() => {
+    return recipeLines.reduce((sum, line) => {
+      const ing = ingredients.flatMap((p) => p.variants).find((v) => v.id === line.ingredientVariantId);
+      return sum + Number(line.quantity || 0) * Number(ing?.cost ?? 0);
+    }, 0);
+  }, [recipeLines, ingredients]);
+
+  const taxLabel = (p: Product) => {
+    const iva = ivaOptions.find((t) => t.code === productIva(p))?.name ?? productIva(p);
+    const inc = consumptionOptions.find((t) => t.code === productInc(p))?.name;
+    return inc && productInc(p) !== "none" ? `${iva} · ${inc}` : iva;
+  };
   const courseLabel = (v?: string) => COURSES.find((c) => c.value === v)?.label ?? v ?? "—";
 
   function openEdit(p: Product) {
@@ -84,7 +182,8 @@ export default function AdminProductsView() {
       description: p.description ?? "",
       categoryId: p.category?.id ?? "",
       type: p.type,
-      taxType: p.taxType,
+      taxType: productIva(p),
+      consumptionTaxType: productInc(p),
       course: p.course ?? "main",
       price: String(v?.price ?? ""),
       cost: String(v?.cost ?? ""),
@@ -104,6 +203,7 @@ export default function AdminProductsView() {
       categoryId: form.categoryId || undefined,
       type: form.type,
       taxType: form.taxType,
+      consumptionTaxType: form.consumptionTaxType,
       course: form.course,
       price: Number(form.price),
       cost: Number(form.cost) || 0,
@@ -162,6 +262,7 @@ export default function AdminProductsView() {
                   <th style={adminStyles.th}>Categoría</th>
                   <th style={adminStyles.th}>Precio</th>
                   <th style={adminStyles.th}>IVA</th>
+                  <th style={adminStyles.th}>Ingredientes</th>
                   <th style={adminStyles.th}>Curso</th>
                   <th style={adminStyles.th}>Barcode</th>
                   <th style={adminStyles.th}>Unidad</th>
@@ -178,13 +279,17 @@ export default function AdminProductsView() {
                     </td>
                     <td style={adminStyles.td}>{p.category?.name ?? "—"}</td>
                     <td style={adminStyles.td}>{formatCOP(Number(p.variants[0]?.price ?? 0))}</td>
-                    <td style={adminStyles.td}>{taxLabel(p.taxType)}</td>
+                    <td style={adminStyles.td}>{taxLabel(p)}</td>
+                    <td style={adminStyles.td}>
+                      {(p.recipeLines?.length ?? 0) > 0 ? `${p.recipeLines!.length} ítems` : "—"}
+                    </td>
                     <td style={adminStyles.td}>{courseLabel(p.course)}</td>
                     <td style={adminStyles.td}>{p.variants[0]?.barcode ?? "—"}</td>
                     <td style={adminStyles.td}>{p.variants[0]?.sellByWeight ? p.variants[0]?.unit ?? "kg" : "und"}</td>
                     <td style={adminStyles.td}><Badge ok={p.isActive} label={p.isActive ? "Activo" : "Inactivo"} /></td>
                     <td style={adminStyles.td}>
                       <button type="button" style={adminStyles.btnSecondary} onClick={() => openEdit(p)}>Editar</button>{" "}
+                      <button type="button" style={adminStyles.btnSecondary} onClick={() => openRecipeModal(p)}>Ingredientes</button>{" "}
                       <button type="button" style={adminStyles.btnDanger} onClick={async () => {
                         await runAction(async () => {
                           await api.patch(`/v1/catalog/products/${p.id}`, { isActive: !p.isActive });
@@ -228,9 +333,14 @@ export default function AdminProductsView() {
                   {PRODUCT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                 </select>
               </Field>
-              <Field label="Impuesto">
+              <Field label="IVA">
                 <select style={adminStyles.select} value={form.taxType} onChange={(e) => setForm({ ...form, taxType: e.target.value })}>
-                  {TAX_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                  {ivaOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
+                </select>
+              </Field>
+              <Field label="Impoconsumo">
+                <select style={adminStyles.select} value={form.consumptionTaxType} onChange={(e) => setForm({ ...form, consumptionTaxType: e.target.value })}>
+                  {consumptionOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
                 </select>
               </Field>
               <Field label="Precio venta">
@@ -260,6 +370,97 @@ export default function AdminProductsView() {
                   ))}
                 </select>
               </Field>
+            )}
+          </AdminModal>
+        )}
+
+        {recipeModal && (
+          <AdminModal
+            title={`Ingredientes: ${recipeModal.name}`}
+            onClose={() => setRecipeModal(null)}
+            footer={
+              <ModalFooter
+                onCancel={() => setRecipeModal(null)}
+                onSave={saveRecipe}
+                saving={recipeSaving}
+                saveLabel="Guardar receta"
+                disabled={recipeLines.length === 0}
+              />
+            }
+          >
+            <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 0 }}>
+              Al cobrar, el inventario descuenta estos insumos (no el plato terminado). Costo estimado: <strong>{formatCOP(recipeCostPreview)}</strong>
+            </p>
+
+            {recipeLines.length > 0 && (
+              <table style={{ ...adminStyles.table, marginBottom: 16 }}>
+                <thead>
+                  <tr>
+                    <th style={adminStyles.th}>Insumo</th>
+                    <th style={adminStyles.th}>Cantidad</th>
+                    <th style={adminStyles.th}>Unidad</th>
+                    <th style={adminStyles.th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recipeLines.map((line) => (
+                    <tr key={line.ingredientVariantId}>
+                      <td style={adminStyles.td}>{line.label}</td>
+                      <td style={adminStyles.td}>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          style={{ ...adminStyles.input, width: 90 }}
+                          value={line.quantity}
+                          onChange={(e) => setRecipeLines(recipeLines.map((l) =>
+                            l.ingredientVariantId === line.ingredientVariantId ? { ...l, quantity: e.target.value } : l,
+                          ))}
+                        />
+                      </td>
+                      <td style={adminStyles.td}>{line.unit}</td>
+                      <td style={adminStyles.td}>
+                        <button
+                          type="button"
+                          style={adminStyles.btnDanger}
+                          onClick={() => setRecipeLines(recipeLines.filter((l) => l.ingredientVariantId !== line.ingredientVariantId))}
+                        >
+                          ×
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <Field label="Agregar insumo">
+              <input
+                style={adminStyles.input}
+                placeholder="Buscar insumo…"
+                value={ingredientSearch}
+                onChange={(e) => setIngredientSearch(e.target.value)}
+              />
+            </Field>
+            {ingredientSearch && (
+              <div style={{ maxHeight: 160, overflow: "auto", border: "1px solid var(--t-border)", borderRadius: 8 }}>
+                {ingredientOptions.slice(0, 12).map((opt) => (
+                  <button
+                    key={opt.variantId}
+                    type="button"
+                    onClick={() => addRecipeLine(opt.variantId, opt.label, opt.unit)}
+                    style={{
+                      display: "block", width: "100%", textAlign: "left", padding: "8px 12px",
+                      border: "none", background: "transparent", cursor: "pointer",
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+                {ingredientOptions.length === 0 && (
+                  <p style={{ padding: 12, margin: 0, fontSize: 13, color: "var(--t-muted)" }}>Sin coincidencias</p>
+                )}
+              </div>
             )}
           </AdminModal>
         )}

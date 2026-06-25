@@ -8,7 +8,7 @@ import {
   OnboardingFiscalDto,
   OnboardingGoLiveDto,
 } from "./dto/onboarding.dto";
-import { BranchType, BusinessVertical, FiscalDocType, ProductType, StaffRole, TaxType } from "@prisma/client";
+import { BranchType, BusinessVertical, FiscalDocType, ProductType, StaffRole } from "@prisma/client";
 import {
   buildOperationalChecklist,
   MANUAL_OPERATIONAL_ITEMS,
@@ -158,7 +158,8 @@ export class OnboardingService {
             categoryId: category.id,
             name,
             type: byWeight ? ProductType.weight_based : ProductType.standard,
-            taxType: TaxType.iva_19,
+            ivaTaxCode: "iva_19",
+            consumptionTaxCode: "none",
             course: dto.template === "restaurant" ? "main" : "bakery",
             variants: {
               create: {

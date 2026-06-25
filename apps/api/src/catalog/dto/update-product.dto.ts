@@ -47,8 +47,30 @@ export class UpdateProductDto {
   sku?: string;
 
   @IsOptional()
-  @IsIn(["iva_19", "iva_5", "exento", "no_gravado"])
+  @IsString()
+  ivaTaxCode?: string;
+
+  @IsOptional()
+  @IsString()
+  consumptionTaxCode?: string;
+
+  /** @deprecated use ivaTaxCode */
+  @IsOptional()
+  @IsString()
   taxType?: string;
+
+  /** @deprecated use consumptionTaxCode */
+  @IsOptional()
+  @IsString()
+  consumptionTaxType?: string;
+
+  @IsOptional()
+  @IsIn(["standard", "combo", "recipe", "weight_based"])
+  type?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  isIngredient?: boolean;
 
   @IsOptional()
   @IsString()

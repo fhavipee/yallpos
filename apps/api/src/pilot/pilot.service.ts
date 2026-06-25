@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { ProductType, TaxType } from "@prisma/client";
-import { PILOT_YALL } from "../config/pilot-yall.config";
+import { ProductType } from "@prisma/client";
+import { PILOT_YALL, resolvePilotItemConsumptionTax, resolvePilotItemTax } from "../config/pilot-yall.config";
+import { seedPilotIngredientsAndRecipes } from "../config/pilot-recipes.util";
 import { PrismaService } from "../prisma/prisma.service";
 import { PosService } from "../pos/pos.service";
 import { RestaurantService } from "../restaurant/restaurant.service";
@@ -67,7 +68,10 @@ export class PilotService {
         });
       }
 
-      for (const [name, price, barcode] of group.items) {
+      for (const item of group.items) {
+        const [name, price, barcode] = item;
+        const ivaTaxCode = resolvePilotItemTax(group, item);
+        const consumptionTaxCode = resolvePilotItemConsumptionTax(group, item);
         activeBarcodes.push(barcode);
         const existingVariant = await this.prisma.productVariant.findFirst({
           where: { barcode, product: { branchId: branch.id } },
@@ -81,7 +85,7 @@ export class PilotService {
           });
           await this.prisma.product.update({
             where: { id: existingVariant.productId },
-            data: { name, categoryId: category.id, course: group.course, isActive: true },
+            data: { name, categoryId: category.id, course: group.course, isActive: true, ivaTaxCode, consumptionTaxCode },
           });
           updated++;
           continue;
@@ -93,7 +97,8 @@ export class PilotService {
             categoryId: category.id,
             name,
             type: ProductType.standard,
-            taxType: TaxType.iva_19,
+            ivaTaxCode,
+            consumptionTaxCode,
             course: group.course,
             variants: {
               create: {
@@ -133,6 +138,7 @@ export class PilotService {
     }
 
     const productCount = await this.prisma.product.count({ where: { branchId: branch.id, isActive: true } });
+    const recipeSeed = await seedPilotIngredientsAndRecipes(this.prisma, branch.id, warehouse.id);
 
     return {
       branchId: branch.id,
@@ -143,6 +149,8 @@ export class PilotService {
       activeProducts: productCount,
       menuCategories: cfg.menu.length,
       menuItems: activeBarcodes.length,
+      ingredientsCreated: recipeSeed.ingredientsCreated,
+      recipesLinked: recipeSeed.recipesLinked,
     };
   }
 

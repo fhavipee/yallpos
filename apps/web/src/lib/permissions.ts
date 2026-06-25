@@ -48,6 +48,7 @@ export const ADMIN_TAB_PERMISSIONS: Record<AdminTab, string[]> = {
   company: ["admin.access", "settings.manage"],
   categories: ["admin.access", "catalog.manage"],
   products: ["admin.access", "catalog.manage"],
+  taxes: ["admin.access", "catalog.manage"],
   modifiers: ["admin.access", "catalog.manage"],
   "daily-menu": ["admin.access", "catalog.manage"],
   floor: ["admin.access", "settings.manage"],

@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, setBranchId, formatCOP } from "../lib/api";
+type TaxDef = { kind: string; code: string; name: string };
 
 type Product = {
   id: string;
   name: string;
   isActive: boolean;
   course?: string;
+  ivaTaxCode?: string;
+  consumptionTaxCode?: string;
+  taxType?: string;
+  consumptionTaxType?: string;
   category?: { id: string; name: string; color?: string };
   variants: { id: string; price: string; cost: string; barcode?: string }[];
 };
@@ -22,29 +27,36 @@ const COURSES = [
 export default function MenuPage({ branchId }: { branchId: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [taxes, setTaxes] = useState<TaxDef[]>([]);
   const [filter, setFilter] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
+  const [editTaxType, setEditTaxType] = useState("iva_19");
+  const [editConsumptionTaxType, setEditConsumptionTaxType] = useState("none");
   const [showNew, setShowNew] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [menuMeta, setMenuMeta] = useState<{ categories: number; items: number } | null>(null);
-  const [newItem, setNewItem] = useState({ name: "", price: "", categoryId: "", course: "main" });
+  const [newItem, setNewItem] = useState({
+    name: "", price: "", categoryId: "", course: "main", taxType: "iva_19", consumptionTaxType: "none",
+  });
   const [dailyIds, setDailyIds] = useState<Set<string>>(new Set());
   const [dailyNote, setDailyNote] = useState("");
   const [savingDaily, setSavingDaily] = useState(false);
   const [dailyMenuOpen, setDailyMenuOpen] = useState(() => localStorage.getItem("menuDailyOpen") !== "0");
 
   async function load() {
-    const [p, c, m, daily] = await Promise.all([
+    const [p, c, t, m, daily] = await Promise.all([
       api.get("/v1/catalog/products", { params: { all: "1" } }),
       api.get("/v1/catalog/categories"),
+      api.get("/v1/catalog/taxes"),
       api.get("/v1/pilot/menu").catch(() => null),
       api.get("/v1/restaurant/daily-menu").catch(() => null),
     ]);
     setProducts(p.data);
     setCategories(c.data);
+    setTaxes(t.data);
     if (m?.data) setMenuMeta({ categories: m.data.categories, items: m.data.items });
     if (daily?.data) {
       setDailyIds(new Set(daily.data.items.map((i: { productId: string }) => i.productId)));
@@ -80,10 +92,24 @@ export default function MenuPage({ branchId }: { branchId: string }) {
     await api.patch(`/v1/catalog/products/${product.id}`, {
       name: editName.trim() || product.name,
       price: Number(editPrice),
+      taxType: editTaxType,
+      consumptionTaxType: editConsumptionTaxType,
     });
     setEditing(null);
     load();
   }
+
+  const ivaOptions = useMemo(() => taxes.filter((t) => t.kind === "iva"), [taxes]);
+  const consumptionOptions = useMemo(() => taxes.filter((t) => t.kind === "consumption"), [taxes]);
+
+  const productIva = (p: Product) => p.ivaTaxCode ?? p.taxType ?? "iva_19";
+  const productInc = (p: Product) => p.consumptionTaxCode ?? p.consumptionTaxType ?? "none";
+
+  const taxLabel = (p: Product) => {
+    const iva = ivaOptions.find((t) => t.code === productIva(p))?.name ?? "IVA 19%";
+    const inc = consumptionOptions.find((t) => t.code === productInc(p))?.name;
+    return inc && productInc(p) !== "none" ? `${iva} · ${inc}` : iva;
+  };
 
   async function toggleActive(product: Product) {
     await api.patch(`/v1/catalog/products/${product.id}`, { isActive: !product.isActive });
@@ -117,9 +143,11 @@ export default function MenuPage({ branchId }: { branchId: string }) {
       price: Number(newItem.price),
       categoryId: newItem.categoryId || undefined,
       course: newItem.course,
+      taxType: newItem.taxType,
+      consumptionTaxType: newItem.consumptionTaxType,
     });
     setShowNew(false);
-    setNewItem({ name: "", price: "", categoryId: "", course: "main" });
+    setNewItem({ name: "", price: "", categoryId: "", course: "main", taxType: "iva_19", consumptionTaxType: "none" });
     load();
   }
 
@@ -278,7 +306,7 @@ export default function MenuPage({ branchId }: { branchId: string }) {
               const isEditing = editing === p.id;
               return (
                 <div key={p.id} style={{
-                  display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12, alignItems: "center",
+                  display: "grid", gridTemplateColumns: isEditing ? "1fr auto auto auto auto auto" : "1fr auto auto auto auto", gap: 12, alignItems: "center",
                   padding: "12px 16px", background: p.isActive ? "var(--t-card)" : "var(--t-card-alt)",
                   border: "1px solid var(--t-border)", borderRadius: 10, opacity: p.isActive ? 1 : 0.6,
                   borderLeft: p.category?.color ? `4px solid ${p.category.color}` : undefined,
@@ -296,8 +324,28 @@ export default function MenuPage({ branchId }: { branchId: string }) {
                     <div style={{ fontSize: 12, color: "var(--t-muted)" }}>
                       {COURSES.find((c) => c.value === p.course)?.label ?? p.course}
                       {barcode ? ` · ${barcode}` : ""}
+                      {!isEditing ? ` · ${taxLabel(p)}` : ""}
                     </div>
                   </div>
+
+                  {isEditing ? (
+                    <>
+                      <select
+                        value={editTaxType}
+                        onChange={(e) => setEditTaxType(e.target.value)}
+                        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--t-border-strong)", fontSize: 12 }}
+                      >
+                        {ivaOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
+                      </select>
+                      <select
+                        value={editConsumptionTaxType}
+                        onChange={(e) => setEditConsumptionTaxType(e.target.value)}
+                        style={{ padding: 6, borderRadius: 6, border: "1px solid var(--t-border-strong)", fontSize: 12 }}
+                      >
+                        {consumptionOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
+                      </select>
+                    </>
+                  ) : null}
 
                   {isEditing ? (
                     <input
@@ -313,7 +361,13 @@ export default function MenuPage({ branchId }: { branchId: string }) {
                     <button onClick={() => saveProduct(p)} style={btnSmall}>Guardar</button>
                   ) : (
                     <button
-                      onClick={() => { setEditing(p.id); setEditName(p.name); setEditPrice(String(price)); }}
+                      onClick={() => {
+                        setEditing(p.id);
+                        setEditName(p.name);
+                        setEditPrice(String(price));
+                        setEditTaxType(productIva(p));
+                        setEditConsumptionTaxType(productInc(p));
+                      }}
                       style={btnSmall}
                     >
                       Editar
@@ -347,6 +401,18 @@ export default function MenuPage({ branchId }: { branchId: string }) {
               Tipo (KDS)
               <select value={newItem.course} onChange={(e) => setNewItem({ ...newItem, course: e.target.value })} style={inputStyle}>
                 {COURSES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              IVA
+              <select value={newItem.taxType} onChange={(e) => setNewItem({ ...newItem, taxType: e.target.value })} style={inputStyle}>
+                {ivaOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              Impoconsumo
+              <select value={newItem.consumptionTaxType} onChange={(e) => setNewItem({ ...newItem, consumptionTaxType: e.target.value })} style={inputStyle}>
+                {consumptionOptions.map((t) => <option key={t.code} value={t.code}>{t.name}</option>)}
               </select>
             </label>
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>

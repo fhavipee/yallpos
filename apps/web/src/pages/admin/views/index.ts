@@ -5,6 +5,7 @@ import AdminBranchView from "./AdminBranchView";
 import AdminCompanyView from "./AdminCompanyView";
 import AdminCategoriesView from "./AdminCategoriesView";
 import AdminProductsView from "./AdminProductsView";
+import AdminTaxesView from "./AdminTaxesView";
 import AdminDailyMenuView from "./AdminDailyMenuView";
 import AdminFloorView from "./AdminFloorView";
 import AdminStaffView from "./AdminStaffView";
@@ -26,6 +27,7 @@ export const ADMIN_VIEWS: Record<AdminTab, ComponentType> = {
   company: AdminCompanyView,
   categories: AdminCategoriesView,
   products: AdminProductsView,
+  taxes: AdminTaxesView,
   "daily-menu": AdminDailyMenuView,
   floor: AdminFloorView,
   staff: AdminStaffView,
