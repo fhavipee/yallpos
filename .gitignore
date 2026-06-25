@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+.env.production
+.env.local
+*.p12
+apps/api/certs/*.p12
+.DS_Store

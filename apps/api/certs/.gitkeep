@@ -1,0 +1,2 @@
+# Coloque aquí el certificado digital .p12 del negocio
+# No commitear el archivo real — agregar *.p12 al .gitignore

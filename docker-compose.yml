@@ -1,0 +1,28 @@
+services:
+  yallpos-postgres:
+    image: postgres:16
+    container_name: yallpos-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yallpos
+      POSTGRES_PASSWORD: yallpos123
+      POSTGRES_DB: yallpos
+    ports:
+      - "5435:5432"
+    volumes:
+      - yallpos_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yallpos -d yallpos"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  yallpos-redis:
+    image: redis:7-alpine
+    container_name: yallpos-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+
+volumes:
+  yallpos_pgdata:

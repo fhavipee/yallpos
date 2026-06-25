@@ -1,0 +1,1 @@
+ALTER TABLE "SalesInvoice" ADD COLUMN IF NOT EXISTS "tableReadyServedAt" TIMESTAMP(3);

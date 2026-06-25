@@ -1,0 +1,794 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, setBranchId, formatCOP } from "../lib/api";
+import { reprintInvoice, printReportX } from "../lib/print";
+import { downloadTableServiceTimesCsv, printTableServiceTimesReport, downloadTableServiceTimesWeeklyCsv, printTableServiceTimesWeeklyReport, getWeekStartMonday } from "../lib/tableServiceReport";
+import { getStoredAuth } from "../lib/auth";
+
+type DashboardData = {
+  summary: {
+    totalSales: number;
+    totalTax: number;
+    totalTips: number;
+    invoiceCount: number;
+    ticketAverage: number;
+    fiscalAccepted: number;
+    fiscalContingency: number;
+    cashSessionOpen: boolean;
+    voidedCount?: number;
+    voidedTotal?: number;
+  };
+  paymentsByMethod: Record<string, number>;
+  topProducts: { name: string; qty: number; total: number }[];
+  salesByHour: { hour: number; total: number }[];
+  tipsByWaiter: { waiterId: string; name: string; sales: number; tips: number; count: number }[];
+  recentSales: { id: string; total: number; invoiceNumber?: string; paidAt: string; serviceType: string }[];
+  voidedOrders?: {
+    id: string;
+    serviceType: string;
+    total: number;
+    voidedAt?: string | null;
+    label: string;
+    reason?: string | null;
+    itemsSummary?: string;
+  }[];
+};
+
+type CashReport = {
+  sessionId?: string;
+  status?: string;
+  openingCash?: number;
+  totalSales?: number;
+  expectedCash?: number;
+  invoiceCount?: number;
+  paymentsByMethod?: Record<string, number>;
+  message?: string;
+};
+
+type ReportXData = {
+  sessionId: string;
+  status: string;
+  businessName: string;
+  branchName: string;
+  openedAt: string;
+  openingCash: number;
+  totalSales: number;
+  totalTips: number;
+  expectedCash: number;
+  invoiceCount: number;
+  paymentsByMethod: Record<string, number>;
+};
+
+type TableServiceTimes = {
+  date: string;
+  summary: {
+    servedCount: number;
+    avgWaitMinutes: number;
+    minWaitMinutes: number;
+    maxWaitMinutes: number;
+    sla?: {
+      slaMinutes: number;
+      withinSlaCount: number;
+      compliancePct: number;
+      breached: boolean;
+    };
+  };
+  byWaiter: { waiterName: string; count: number; avgWaitMinutes: number }[];
+  slaByWaiter?: {
+    waiterId: string | null;
+    waiterName: string;
+    count: number;
+    avgWaitMinutes: number;
+    withinSlaCount: number;
+    compliancePct: number;
+    breached: boolean;
+  }[];
+  rows: {
+    invoiceId: string;
+    tableLabel: string;
+    waiterName: string;
+    readyAt: string;
+    servedAt: string;
+    waitMinutes: number;
+    itemsSummary?: string;
+  }[];
+};
+
+type WeeklyServiceTimes = {
+  weekStart: string;
+  weekEnd: string;
+  summary: {
+    servedCount: number;
+    avgWaitMinutes: number;
+    minWaitMinutes: number;
+    maxWaitMinutes: number;
+    sla?: {
+      slaMinutes: number;
+      withinSlaCount: number;
+      compliancePct: number;
+      breached: boolean;
+    };
+  };
+  slaAlert?: { notified?: boolean; reason?: string };
+  slaByWaiter?: {
+    waiterId: string | null;
+    waiterName: string;
+    count: number;
+    avgWaitMinutes: number;
+    withinSlaCount: number;
+    compliancePct: number;
+    breached: boolean;
+  }[];
+  byShift: { shift: string; shiftLabel: string; servedCount: number; avgWaitMinutes: number }[];
+  byDay: {
+    date: string;
+    servedCount: number;
+    avgWaitMinutes: number;
+    byShift: { shift: string; shiftLabel: string; servedCount: number; avgWaitMinutes: number }[];
+  }[];
+};
+
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: "Efectivo",
+  card: "Tarjeta",
+  transfer: "Transferencia",
+  qr: "QR",
+  credit: "Crédito",
+  voucher: "Vale",
+  mixed: "Mixto",
+};
+
+export default function Dashboard({ branchId }: { branchId: string }) {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [cash, setCash] = useState<CashReport | null>(null);
+  const [closingCash, setClosingCash] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [printingId, setPrintingId] = useState<string | null>(null);
+  const [reportX, setReportX] = useState<ReportXData | null>(null);
+  const [loadingReportX, setLoadingReportX] = useState(false);
+  const [printingReportX, setPrintingReportX] = useState(false);
+  const [openingCash, setOpeningCash] = useState("150000");
+  const [openingSession, setOpeningSession] = useState(false);
+  const [serviceTimes, setServiceTimes] = useState<TableServiceTimes | null>(null);
+  const [weeklyTimes, setWeeklyTimes] = useState<WeeklyServiceTimes | null>(null);
+  const [weekStart, setWeekStart] = useState(() => getWeekStartMonday());
+  const [exportingTimes, setExportingTimes] = useState<"csv" | "pdf" | null>(null);
+  const [exportingWeekly, setExportingWeekly] = useState<"csv" | "pdf" | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [dash, cashReport, timesReport, weeklyReport] = await Promise.all([
+        api.get("/v1/reports/dashboard"),
+        api.get("/v1/reports/cash"),
+        api.get("/v1/reports/table-service-times").catch(() => ({ data: null })),
+        api.get("/v1/reports/table-service-times/weekly", { params: { weekStart } }).catch(() => ({ data: null })),
+      ]);
+      setData(dash.data);
+      setCash(cashReport.data);
+      setServiceTimes(timesReport.data);
+      setWeeklyTimes(weeklyReport.data);
+    } finally {
+      setLoading(false);
+    }
+  }, [weekStart]);
+
+  useEffect(() => { setBranchId(branchId); }, [branchId]);
+
+  useEffect(() => { load(); }, [branchId, load]);
+
+  useEffect(() => {
+    const t = setInterval(load, 30000);
+    return () => clearInterval(t);
+  }, [load]);
+
+  async function openCashSession() {
+    const auth = getStoredAuth();
+    if (!auth?.user?.id) return alert("Inicia sesión de nuevo");
+    setOpeningSession(true);
+    try {
+      await api.post("/v1/cash/session/open", {
+        userId: auth.user.id,
+        openingCash: Number(openingCash) || 0,
+      });
+      await load();
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "No se pudo abrir caja");
+    } finally {
+      setOpeningSession(false);
+    }
+  }
+
+  async function closeCash() {
+    if (!cash?.sessionId || !closingCash) return;
+    await api.post(`/v1/cash/session/${cash.sessionId}/close`, {
+      closingCash: Number(closingCash),
+    });
+    alert("✅ Caja cerrada");
+    setClosingCash("");
+    load();
+  }
+
+  async function handleReprint(invoiceId: string) {
+    setPrintingId(invoiceId);
+    try {
+      const result = await reprintInvoice(invoiceId);
+      if (!result.ok) alert("No se pudo imprimir el tiquete");
+    } finally {
+      setPrintingId(null);
+    }
+  }
+
+  async function showReportX() {
+    if (!cash?.sessionId) return alert("No hay sesión de caja abierta");
+    setLoadingReportX(true);
+    try {
+      const res = await api.get(`/v1/cash/session/${cash.sessionId}/report-x`);
+      setReportX(res.data);
+    } catch {
+      alert("No se pudo cargar el reporte X");
+    } finally {
+      setLoadingReportX(false);
+    }
+  }
+
+  async function handlePrintReportX() {
+    if (!reportX?.sessionId) return;
+    setPrintingReportX(true);
+    try {
+      const result = await printReportX(reportX.sessionId);
+      if (!result.ok) alert("Print Agent no disponible — configure impresora en puerto 9101");
+    } finally {
+      setPrintingReportX(false);
+    }
+  }
+
+  function serviceLabel(type: string) {
+    if (type === "dine_in") return "Mesa";
+    if (type === "counter") return "Mostrador";
+    return type;
+  }
+
+  if (loading && !data) return <div>Cargando dashboard…</div>;
+  if (!data) return <div>Sin datos</div>;
+
+  const maxHour = Math.max(...data.salesByHour.map((h) => h.total), 1);
+
+  return (
+    <div>
+      {reportX && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
+        }}>
+          <div style={{ background: "var(--t-card)", borderRadius: 16, padding: 24, width: 420, maxWidth: "92vw" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Reporte X</h3>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--t-muted)" }}>
+                  {reportX.businessName} · {reportX.branchName}
+                </p>
+              </div>
+              <button onClick={() => setReportX(null)} style={{ border: "none", background: "transparent", fontSize: 20, cursor: "pointer", color: "var(--t-muted)" }}>×</button>
+            </div>
+
+            <div style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 12 }}>
+              Apertura: {new Date(reportX.openedAt).toLocaleString("es-CO")}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+              <ReportKpi label="Ventas sesión" value={formatCOP(reportX.totalSales)} />
+              <ReportKpi label="Transacciones" value={String(reportX.invoiceCount)} />
+              <ReportKpi label="Propinas" value={formatCOP(reportX.totalTips ?? 0)} />
+              <ReportKpi label="Efectivo esperado" value={formatCOP(reportX.expectedCash)} />
+            </div>
+
+            <div style={{ background: "var(--t-card-alt)", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Medios de pago</div>
+              {Object.entries(reportX.paymentsByMethod).length === 0 ? (
+                <p style={{ margin: 0, fontSize: 13, color: "var(--t-muted)" }}>Sin pagos registrados</p>
+              ) : (
+                Object.entries(reportX.paymentsByMethod).map(([method, amount]) => (
+                  <div key={method} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
+                    <span>{PAYMENT_LABELS[method] ?? method}</span>
+                    <strong>{formatCOP(Number(amount))}</strong>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={handlePrintReportX}
+                disabled={printingReportX}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" }}
+              >
+                {printingReportX ? "Imprimiendo…" : "🖨️ Imprimir térmica"}
+              </button>
+              <button
+                onClick={() => setReportX(null)}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}
+              >
+                Cerrar
+              </button>
+            </div>
+            <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--t-muted)", textAlign: "center" }}>
+              Caja abierta — no es cierre Z
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <h2 style={{ margin: 0 }}>Dashboard — Hoy</h2>
+        <button onClick={load} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>
+          Actualizar
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
+        <Kpi label="Ventas hoy" value={formatCOP(data.summary.totalSales)} accent="#2563eb" />
+        <Kpi label="Transacciones" value={String(data.summary.invoiceCount)} accent="#7c3aed" />
+        <Kpi label="Ticket promedio" value={formatCOP(data.summary.ticketAverage)} accent="#0891b2" />
+        <Kpi label="IVA recaudado" value={formatCOP(data.summary.totalTax)} accent="#059669" />
+        <Kpi label="Propinas" value={formatCOP(data.summary.totalTips ?? 0)} accent="#d97706" />
+        <Kpi label="DE POS OK" value={String(data.summary.fiscalAccepted)} accent="#16a34a" />
+        <Kpi label="Contingencia" value={String(data.summary.fiscalContingency)} accent={data.summary.fiscalContingency ? "#dc2626" : "#94a3b8"} />
+        <Kpi label="Anulados hoy" value={String(data.summary.voidedCount ?? 0)} accent="#dc2626" />
+        <Kpi label="Valor anulado" value={formatCOP(data.summary.voidedTotal ?? 0)} accent="#b91c1c" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+        <Card title="Ventas por hora">
+          {data.salesByHour.length === 0 ? (
+            <p style={{ color: "var(--t-muted)", fontSize: 14 }}>Sin ventas aún hoy</p>
+          ) : (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 100 }}>
+              {data.salesByHour.map((h) => (
+                <div key={h.hour} style={{ flex: 1, textAlign: "center" }}>
+                  <div style={{
+                    height: `${(h.total / maxHour) * 80}px`, background: "#2563eb",
+                    borderRadius: "4px 4px 0 0", minHeight: 4,
+                  }} title={formatCOP(h.total)} />
+                  <div style={{ fontSize: 10, color: "var(--t-muted)", marginTop: 4 }}>{h.hour}h</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card title="Medios de pago">
+          {Object.entries(data.paymentsByMethod).map(([method, amount]) => (
+            <div key={method} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 6 }}>
+              <span style={{ textTransform: "capitalize" }}>{method}</span>
+              <strong>{formatCOP(amount)}</strong>
+            </div>
+          ))}
+          {Object.keys(data.paymentsByMethod).length === 0 && (
+            <p style={{ color: "var(--t-muted)", fontSize: 14 }}>Sin pagos registrados</p>
+          )}
+        </Card>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <Card title="Top productos">
+          {data.topProducts.map((p, i) => (
+            <div key={p.name} style={{ display: "flex", gap: 8, fontSize: 14, marginBottom: 8 }}>
+              <span style={{ color: "var(--t-muted)", width: 20 }}>{i + 1}.</span>
+              <span style={{ flex: 1 }}>{p.name}</span>
+              <span style={{ color: "var(--t-muted)" }}>x{p.qty.toFixed(1)}</span>
+              <strong>{formatCOP(p.total)}</strong>
+            </div>
+          ))}
+        </Card>
+
+        <Card title="Caja">
+          {cash?.message ? (
+            <>
+              <p style={{ color: "var(--t-muted)", marginBottom: 12 }}>{cash.message}</p>
+              <label style={{ display: "grid", gap: 6, fontSize: 14 }}>
+                Efectivo inicial
+                <input
+                  value={openingCash}
+                  onChange={(e) => setOpeningCash(e.target.value)}
+                  style={{ padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                />
+              </label>
+              <button
+                onClick={openCashSession}
+                disabled={openingSession}
+                style={{ marginTop: 10, padding: "10px 14px", borderRadius: 8, border: "none", background: "#2563eb", color: "#fff", cursor: "pointer" }}
+              >
+                {openingSession ? "Abriendo…" : "Abrir caja del día"}
+              </button>
+            </>
+          ) : (
+            <>
+              <Row label="Estado" value={cash?.status === "open" ? "🟢 Abierta" : "Cerrada"} />
+              <Row label="Apertura" value={formatCOP(cash?.openingCash ?? 0)} />
+              <Row label="Ventas sesión" value={formatCOP(cash?.totalSales ?? 0)} />
+              <Row label="Efectivo esperado" value={formatCOP(cash?.expectedCash ?? 0)} />
+              {cash?.status === "open" && (
+                <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+                  <button onClick={showReportX} disabled={loadingReportX} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" }}>
+                    {loadingReportX ? "Cargando…" : "Ver reporte X"}
+                  </button>
+                  <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    placeholder="Efectivo contado"
+                    value={closingCash}
+                    onChange={(e) => setClosingCash(e.target.value)}
+                    style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                  />
+                  <button onClick={closeCash} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "#dc2626", color: "#fff", cursor: "pointer" }}>
+                    Cerrar caja
+                  </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+      </div>
+
+      {data.tipsByWaiter?.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Card title="Propinas por mesero — hoy">
+            {data.tipsByWaiter.map((w) => (
+              <div key={w.waiterId} style={{
+                display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12,
+                fontSize: 14, marginBottom: 10, paddingBottom: 10, borderBottom: "1px solid var(--t-border)",
+              }}>
+                <div style={{ fontWeight: 600 }}>{w.name}</div>
+                <span style={{ color: "var(--t-muted)" }}>{w.count} mesas</span>
+                <span>{formatCOP(w.sales)}</span>
+                <strong style={{ color: "#d97706" }}>{formatCOP(w.tips)} propina</strong>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+
+      {serviceTimes && (
+        <div style={{ marginTop: 16 }}>
+          <Card title="Tiempos mesa — cocina lista → servida (hoy)">
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+              <button
+                onClick={async () => {
+                  setExportingTimes("csv");
+                  try { await downloadTableServiceTimesCsv(serviceTimes.date); } finally { setExportingTimes(null); }
+                }}
+                disabled={exportingTimes !== null}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 13 }}
+              >
+                {exportingTimes === "csv" ? "…" : "Descargar CSV"}
+              </button>
+              <button
+                onClick={async () => {
+                  setExportingTimes("pdf");
+                  try { await printTableServiceTimesReport(serviceTimes.date); } finally { setExportingTimes(null); }
+                }}
+                disabled={exportingTimes !== null}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 13 }}
+              >
+                {exportingTimes === "pdf" ? "…" : "Imprimir PDF"}
+              </button>
+            </div>
+            {serviceTimes.summary.servedCount === 0 ? (
+              <p style={{ color: "var(--t-muted)", fontSize: 14, margin: 0 }}>Sin entregas registradas hoy</p>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }}>
+                  <ReportKpi label="Entregas" value={String(serviceTimes.summary.servedCount)} />
+                  <ReportKpi label="Promedio" value={`${serviceTimes.summary.avgWaitMinutes} min`} />
+                  <ReportKpi label="Mínimo" value={`${serviceTimes.summary.minWaitMinutes} min`} />
+                  <ReportKpi label="Máximo" value={`${serviceTimes.summary.maxWaitMinutes} min`} />
+                  {serviceTimes.summary.sla && (
+                    <>
+                      <ReportKpi label="Meta SLA" value={`${serviceTimes.summary.sla.slaMinutes} min`} />
+                      <ReportKpi
+                        label="Cumplimiento SLA"
+                        value={`${serviceTimes.summary.sla.compliancePct}%`}
+                      />
+                    </>
+                  )}
+                </div>
+                {serviceTimes.summary.sla?.breached && (
+                  <p style={{ margin: "0 0 12px", fontSize: 13, color: "#b91c1c", fontWeight: 600 }}>
+                    ⚠️ Promedio de hoy supera la meta SLA ({serviceTimes.summary.sla.slaMinutes} min)
+                  </p>
+                )}
+                {serviceTimes.slaByWaiter && serviceTimes.slaByWaiter.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>
+                      Cumplimiento SLA por mesero (meta {serviceTimes.summary.sla?.slaMinutes ?? 8} min)
+                    </div>
+                    {serviceTimes.slaByWaiter.map((w) => (
+                      <div key={w.waiterId ?? w.waiterName} style={{
+                        display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12,
+                        fontSize: 13, marginBottom: 6, alignItems: "center",
+                      }}>
+                        <span>{w.waiterName}</span>
+                        <span style={{ color: "var(--t-muted)" }}>{w.withinSlaCount}/{w.count}</span>
+                        <span style={{ color: w.breached ? "#b91c1c" : "#166534", fontWeight: 600 }}>
+                          {w.compliancePct}%
+                        </span>
+                        <strong style={{ color: w.breached ? "#b91c1c" : "#2563eb" }}>
+                          {w.avgWaitMinutes} min
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {serviceTimes.byWaiter.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>Por mesero</div>
+                    {serviceTimes.byWaiter.map((w) => (
+                      <div key={w.waiterName} style={{
+                        display: "grid", gridTemplateColumns: "1fr auto auto", gap: 12,
+                        fontSize: 13, marginBottom: 6,
+                      }}>
+                        <span>{w.waiterName}</span>
+                        <span style={{ color: "var(--t-muted)" }}>{w.count} entregas</span>
+                        <strong>{w.avgWaitMinutes} min prom.</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ maxHeight: 240, overflowY: "auto" }}>
+                  {serviceTimes.rows.slice(0, 15).map((row) => (
+                    <div key={row.invoiceId} style={{
+                      display: "grid", gridTemplateColumns: "1fr auto", gap: 12,
+                      fontSize: 13, marginBottom: 8, paddingBottom: 8, borderBottom: "1px solid var(--t-border)",
+                    }}>
+                      <div>
+                        <strong>{row.tableLabel}</strong>
+                        <div style={{ fontSize: 11, color: "var(--t-muted)" }}>
+                          {row.waiterName}
+                          {row.itemsSummary ? ` · ${row.itemsSummary}` : ""}
+                          {" · "}
+                          {new Date(row.readyAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                          {" → "}
+                          {new Date(row.servedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                        </div>
+                      </div>
+                      <strong style={{ color: row.waitMinutes >= 10 ? "#b91c1c" : "#2563eb" }}>
+                        {row.waitMinutes} min
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {weeklyTimes && (
+        <div style={{ marginTop: 16 }}>
+          <Card title="Reporte semanal por turno — tiempos mesa">
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                Semana desde
+                <input
+                  type="date"
+                  value={weekStart}
+                  onChange={(e) => setWeekStart(e.target.value)}
+                  style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--t-border-strong)" }}
+                />
+              </label>
+              <button
+                onClick={load}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 13 }}
+              >
+                Actualizar
+              </button>
+              <button
+                onClick={async () => {
+                  setExportingWeekly("csv");
+                  try { await downloadTableServiceTimesWeeklyCsv(weekStart); } finally { setExportingWeekly(null); }
+                }}
+                disabled={exportingWeekly !== null}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 13 }}
+              >
+                {exportingWeekly === "csv" ? "…" : "CSV semanal"}
+              </button>
+              <button
+                onClick={async () => {
+                  setExportingWeekly("pdf");
+                  try { await printTableServiceTimesWeeklyReport(weekStart); } finally { setExportingWeekly(null); }
+                }}
+                disabled={exportingWeekly !== null}
+                style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 13 }}
+              >
+                {exportingWeekly === "pdf" ? "…" : "PDF semanal"}
+              </button>
+            </div>
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--t-muted)" }}>
+              {weeklyTimes.weekStart} — {weeklyTimes.weekEnd}
+              {" · "}
+              Turnos: almuerzo 11–15h, cena 18–23h, otro resto del día
+            </p>
+            {weeklyTimes.summary.servedCount === 0 ? (
+              <p style={{ color: "var(--t-muted)", fontSize: 14, margin: 0 }}>Sin entregas en esta semana</p>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 10, marginBottom: 14 }}>
+                  <ReportKpi label="Entregas" value={String(weeklyTimes.summary.servedCount)} />
+                  <ReportKpi label="Promedio" value={`${weeklyTimes.summary.avgWaitMinutes} min`} />
+                  <ReportKpi label="Mínimo" value={`${weeklyTimes.summary.minWaitMinutes} min`} />
+                  <ReportKpi label="Máximo" value={`${weeklyTimes.summary.maxWaitMinutes} min`} />
+                  {weeklyTimes.summary.sla && (
+                    <>
+                      <ReportKpi label="Meta SLA" value={`${weeklyTimes.summary.sla.slaMinutes} min`} />
+                      <ReportKpi label="Cumplimiento SLA" value={`${weeklyTimes.summary.sla.compliancePct}%`} />
+                    </>
+                  )}
+                </div>
+                {weeklyTimes.summary.sla?.breached && (
+                  <p style={{ margin: "0 0 12px", fontSize: 13, color: "#b91c1c", fontWeight: 600 }}>
+                    ⚠️ Promedio semanal supera la meta SLA ({weeklyTimes.summary.sla.slaMinutes} min)
+                    {weeklyTimes.slaAlert?.notified ? " · Webhook enviado" : ""}
+                  </p>
+                )}
+                {weeklyTimes.slaByWaiter && weeklyTimes.slaByWaiter.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>
+                      Cumplimiento SLA por mesero (semana)
+                    </div>
+                    {weeklyTimes.slaByWaiter.map((w) => (
+                      <div key={w.waiterId ?? w.waiterName} style={{
+                        display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12,
+                        fontSize: 13, marginBottom: 6, alignItems: "center",
+                      }}>
+                        <span>{w.waiterName}</span>
+                        <span style={{ color: "var(--t-muted)" }}>{w.withinSlaCount}/{w.count}</span>
+                        <span style={{ color: w.breached ? "#b91c1c" : "#166534", fontWeight: 600 }}>
+                          {w.compliancePct}%
+                        </span>
+                        <strong style={{ color: w.breached ? "#b91c1c" : "#2563eb" }}>
+                          {w.avgWaitMinutes} min prom.
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {weeklyTimes.byShift.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>Por turno (semana)</div>
+                    {weeklyTimes.byShift.map((row) => (
+                      <div key={row.shift} style={{
+                        display: "grid", gridTemplateColumns: "1fr auto auto", gap: 12,
+                        fontSize: 13, marginBottom: 6,
+                      }}>
+                        <span>{row.shiftLabel}</span>
+                        <span style={{ color: "var(--t-muted)" }}>{row.servedCount} entregas</span>
+                        <strong>{row.avgWaitMinutes} min prom.</strong>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {weeklyTimes.byDay.length > 0 && (
+                  <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                    <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>Por día y turno</div>
+                    {weeklyTimes.byDay.flatMap((day) =>
+                      day.byShift.map((shift) => (
+                        <div
+                          key={`${day.date}-${shift.shift}`}
+                          style={{
+                            display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 12,
+                            fontSize: 13, marginBottom: 6, paddingBottom: 6, borderBottom: "1px solid var(--t-border)",
+                          }}
+                        >
+                          <span style={{ color: "var(--t-muted)" }}>{day.date}</span>
+                          <span>{shift.shiftLabel}</span>
+                          <span style={{ color: "var(--t-muted)" }}>{shift.servedCount} ent.</span>
+                          <strong>{shift.avgWaitMinutes} min</strong>
+                        </div>
+                      )),
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </Card>
+        </div>
+      )}
+
+      <div style={{ marginTop: 16 }}>
+        <Card title="Pedidos anulados — hoy">
+          {(data.voidedOrders?.length ?? 0) === 0 ? (
+            <p style={{ color: "var(--t-muted)", fontSize: 14 }}>Sin anulaciones registradas hoy</p>
+          ) : (
+            data.voidedOrders!.map((order) => (
+              <div key={order.id} style={{
+                display: "grid", gridTemplateColumns: "1fr auto", gap: 12,
+                alignItems: "center", fontSize: 14, marginBottom: 10, paddingBottom: 10,
+                borderBottom: "1px solid var(--t-border)",
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600, color: "#b91c1c" }}>{order.label}</div>
+                  <div style={{ fontSize: 12, color: "var(--t-muted)" }}>
+                    {serviceLabel(order.serviceType)}
+                    {order.voidedAt ? ` · ${new Date(order.voidedAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}` : ""}
+                    {order.itemsSummary ? ` · ${order.itemsSummary}` : ""}
+                  </div>
+                  {order.reason && (
+                    <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 2 }}>{order.reason}</div>
+                  )}
+                </div>
+                <strong>{formatCOP(order.total)}</strong>
+              </div>
+            ))
+          )}
+        </Card>
+      </div>
+
+      <div style={{ marginTop: 16 }}>
+        <Card title="Últimas ventas">
+          {data.recentSales.length === 0 ? (
+            <p style={{ color: "var(--t-muted)", fontSize: 14 }}>Sin ventas pagadas hoy</p>
+          ) : (
+            data.recentSales.map((sale) => (
+              <div key={sale.id} style={{
+                display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12,
+                alignItems: "center", fontSize: 14, marginBottom: 10, paddingBottom: 10,
+                borderBottom: "1px solid var(--t-border)",
+              }}>
+                <div>
+                  <div style={{ fontWeight: 600 }}>{formatCOP(sale.total)}</div>
+                  <div style={{ fontSize: 12, color: "var(--t-muted)" }}>
+                    {serviceLabel(sale.serviceType)} · {new Date(sale.paidAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                    {sale.invoiceNumber ? ` · ${sale.invoiceNumber}` : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleReprint(sale.id)}
+                  disabled={printingId === sale.id}
+                  style={{ padding: "6px 12px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 13 }}
+                >
+                  {printingId === sale.id ? "…" : "🖨️ Reimprimir"}
+                </button>
+              </div>
+            ))
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function ReportKpi({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ background: "var(--t-card)", border: "1px solid var(--t-border)", borderRadius: 10, padding: 12 }}>
+      <div style={{ fontSize: 11, color: "var(--t-muted)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
+function Kpi({ label, value, accent }: { label: string; value: string; accent: string }) {
+  return (
+    <div style={{ background: "var(--t-card)", borderRadius: 12, padding: 16, border: "1px solid var(--t-border)", borderTop: `3px solid ${accent}` }}>
+      <div style={{ fontSize: 12, color: "var(--t-muted)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
+    </div>
+  );
+}
+
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div style={{ background: "var(--t-card)", borderRadius: 12, padding: 16, border: "1px solid var(--t-border)" }}>
+      <h4 style={{ margin: "0 0 12px", fontSize: 15 }}>{title}</h4>
+      {children}
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 6 }}>
+      <span style={{ color: "var(--t-muted)" }}>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}

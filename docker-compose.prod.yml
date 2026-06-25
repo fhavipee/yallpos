@@ -1,0 +1,72 @@
+# YallPos — producción (restaurante / LAN)
+# Uso: scripts/deploy.sh
+# POS: http://<IP-del-servidor>:8080
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: yallpos-prod-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-yallpos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:-yallpos}
+    volumes:
+      - yallpos_prod_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-yallpos} -d ${POSTGRES_DB:-yallpos}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: yallpos-prod-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: yallpos-prod-api
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-yallpos}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-yallpos}?schema=public
+      PORT: "3000"
+      RUN_SEED: ${RUN_SEED:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ""
+        VITE_PRINT_AGENT_URL: ${VITE_PRINT_AGENT_URL:-http://127.0.0.1:9101}
+    container_name: yallpos-prod-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  yallpos_prod_pgdata:

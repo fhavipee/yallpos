@@ -1,0 +1,1 @@
+ALTER TABLE "SalesInvoice" ADD COLUMN IF NOT EXISTS "tableReadyNotifiedAt" TIMESTAMP(3);

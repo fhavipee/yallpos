@@ -1,0 +1,352 @@
+import { Injectable, NotFoundException } from "@nestjs/common";
+import { PrismaService } from "../prisma/prisma.service";
+import { buildEscPosReceipt, ReceiptData } from "./escpos.encoder";
+
+@Injectable()
+export class ReceiptService {
+  constructor(private prisma: PrismaService) {}
+
+  private isSimulation() {
+    return (process.env.FISCAL_ENV ?? "simulacion") === "simulacion";
+  }
+
+  async getReceiptData(branchId: string, invoiceId: string): Promise<ReceiptData> {
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id: invoiceId, branchId },
+      include: {
+        lines: true,
+        payments: true,
+        fiscalDocuments: { orderBy: { issuedAt: "desc" }, take: 1 },
+        branch: { include: { company: true } },
+        tableSession: { include: { table: { include: { area: true } } } },
+      },
+    });
+    if (!invoice) throw new NotFoundException("Venta no encontrada");
+
+    const company = invoice.branch.company;
+    const fiscal = invoice.fiscalDocuments[0];
+    const simulationMode = this.isSimulation();
+
+    let waiterName: string | undefined;
+    if (invoice.waiterId) {
+      const waiter = await this.prisma.staff.findUnique({ where: { id: invoice.waiterId } });
+      waiterName = waiter?.name;
+    }
+
+    const table = invoice.tableSession?.table;
+    const tableLabel = table
+      ? `${table.area?.name ? `${table.area.name} · ` : ""}Mesa ${table.name}`
+      : undefined;
+
+    return {
+      businessName: company.razonSocial ?? company.name,
+      nit: `${company.nit}${company.dv ? `-${company.dv}` : ""}`,
+      branchName: invoice.branch.name,
+      address: company.address ?? undefined,
+      phone: company.phone ?? undefined,
+      docNumber: fiscal?.fullNumber ?? invoice.invoiceNumber ?? undefined,
+      cude: simulationMode ? undefined : fiscal?.cude ?? undefined,
+      isContingency: fiscal?.status === "contingency",
+      simulationMode,
+      tableLabel,
+      waiterName,
+      guestsCount: invoice.guestsCount ?? undefined,
+      lines: invoice.lines.map((l) => ({
+        name: l.nameSnapshot,
+        qty: String(l.qty),
+        total: Number(l.lineTotal),
+      })),
+      subtotal: Number(invoice.subtotal),
+      tax: Number(invoice.tax),
+      total: Number(invoice.total) + Number(invoice.tipAmount),
+      tip: Number(invoice.tipAmount) || undefined,
+      payments: invoice.payments.map((p) => ({
+        method: p.method,
+        amount: Number(p.amount),
+      })),
+      printedAt: new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" }),
+    };
+  }
+
+  async getEscPosBase64(branchId: string, invoiceId: string): Promise<{ base64: string; bytes: number }> {
+    const data = await this.getReceiptData(branchId, invoiceId);
+    const buf = buildEscPosReceipt(data);
+    return { base64: buf.toString("base64"), bytes: buf.length };
+  }
+
+  async getHtmlReceipt(branchId: string, invoiceId: string): Promise<string> {
+    const d = await this.getReceiptData(branchId, invoiceId);
+    const rows = d.lines
+      .map(
+        (l) =>
+          `<tr><td>${l.name}</td><td style="text-align:center">${l.qty}</td><td style="text-align:right">$${l.total.toLocaleString("es-CO")}</td></tr>`,
+      )
+      .join("");
+
+    const docHeader = d.simulationMode
+      ? `<div class="center sim"><strong>COMPROBANTE INTERNO</strong><br>NO VÁLIDO FISCAL — Piloto YallPos</div>`
+      : `<div class="center"><strong>DOC. EQUIVALENTE POS</strong></div>`;
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Tiquete</title>
+<style>
+  @media print { @page { margin: 4mm; size: 80mm auto; } }
+  body { font-family: monospace; font-size: 12px; width: 72mm; margin: 0 auto; }
+  h1 { font-size: 14px; text-align: center; margin: 4px 0; }
+  .center { text-align: center; }
+  .sim { color: #b45309; }
+  .contingency { color: red; font-weight: bold; text-align: center; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 2px 0; vertical-align: top; }
+  .total { font-weight: bold; font-size: 14px; }
+  hr { border: none; border-top: 1px dashed #000; }
+</style></head><body>
+  <h1>${d.businessName}</h1>
+  <div class="center">NIT: ${d.nit}</div>
+  <div class="center">${d.branchName}</div>
+  ${d.address ? `<div class="center">${d.address}</div>` : ""}
+  ${d.phone ? `<div class="center">Tel: ${d.phone}</div>` : ""}
+  <hr>
+  ${docHeader}
+  ${d.tableLabel ? `<div>Mesa: ${d.tableLabel}</div>` : ""}
+  ${d.waiterName ? `<div>Mesero: ${d.waiterName}</div>` : ""}
+  ${d.docNumber && !d.simulationMode ? `<div>No: ${d.docNumber}</div>` : ""}
+  ${d.simulationMode && d.docNumber ? `<div>Ref: ${d.docNumber}</div>` : ""}
+  ${d.cude ? `<div style="font-size:9px">CUDE: ${d.cude}</div>` : ""}
+  ${d.isContingency ? `<div class="contingency">** CONTINGENCIA DIAN **</div>` : ""}
+  <div>${d.printedAt}</div>
+  <hr>
+  <table>${rows}</table>
+  <hr>
+  <div>Subtotal: $${d.subtotal.toLocaleString("es-CO")}</div>
+  <div>IVA: $${d.tax.toLocaleString("es-CO")}</div>
+  ${d.tip ? `<div>Propina: $${d.tip.toLocaleString("es-CO")}</div>` : ""}
+  <div class="total">TOTAL: $${d.total.toLocaleString("es-CO")}</div>
+  <hr>
+  ${d.payments.map((p) => `<div>${p.method.toUpperCase()}: $${p.amount.toLocaleString("es-CO")}</div>`).join("")}
+  <hr>
+  <div class="center">Gracias por su visita</div>
+  <div class="center" style="font-size:10px">YallPos</div>
+</body></html>`;
+  }
+
+  async getKitchenHtml(branchId: string, invoiceId: string): Promise<string> {
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id: invoiceId, branchId },
+      include: {
+        lines: true,
+        branch: true,
+        tableSession: { include: { table: { include: { area: true } } } },
+      },
+    });
+    if (!invoice) throw new NotFoundException("Comanda no encontrada");
+
+    let waiterName = "—";
+    if (invoice.waiterId) {
+      const w = await this.prisma.staff.findUnique({ where: { id: invoice.waiterId } });
+      if (w) waiterName = w.name;
+    }
+
+    const table = invoice.tableSession?.table;
+    const tableLabel = table
+      ? `${table.area?.name ?? ""} · Mesa ${table.name}`.trim()
+      : "Mostrador";
+
+    const now = new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" });
+    const rows = invoice.lines
+      .map((l) => {
+        const note = l.lineNotes ? `<div style="font-size:11px;color:#666">↳ ${l.lineNotes}</div>` : "";
+        return `<div style="margin-bottom:8px"><strong>${l.qty}× ${l.nameSnapshot}</strong>${note}</div>`;
+      })
+      .join("");
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Comanda cocina</title>
+<style>@media print{@page{margin:4mm;size:80mm auto}}body{font-family:monospace;font-size:13px;width:72mm;margin:0 auto}
+h1{font-size:16px;text-align:center;margin:0}.meta{font-size:12px;margin:4px 0}hr{border:none;border-top:2px dashed #000}
+</style></head><body>
+<h1>🍳 COMANDA COCINA</h1>
+<div class="meta"><strong>${tableLabel}</strong></div>
+<div class="meta">Mesero: ${waiterName} · ${invoice.guestsCount ?? "?"} comensales</div>
+<div class="meta">${now}</div>
+<hr>${rows || "<p>Sin ítems</p>"}<hr>
+<div style="text-align:center;font-size:11px">YallPos — Restaurante de Yall</div>
+<script>window.onload=()=>window.print()</script></body></html>`;
+  }
+
+  async getKitchenEscPosBase64(branchId: string, invoiceId: string): Promise<{ base64: string; bytes: number }> {
+    const { buildEscPosKitchen } = await import("./escpos.encoder");
+    const data = await this.getKitchenData(branchId, invoiceId);
+    const buf = buildEscPosKitchen(data);
+    return { base64: buf.toString("base64"), bytes: buf.length };
+  }
+
+  async getKitchenVoidHtml(branchId: string, invoiceId: string): Promise<string> {
+    const data = await this.getKitchenVoidData(branchId, invoiceId);
+    const rows = data.lines
+      .map((l) => {
+        const note = l.notes ? `<div style="font-size:11px;color:#666">↳ ${l.notes}</div>` : "";
+        return `<div style="margin-bottom:8px"><strong>${l.qty}× ${l.name}</strong>${note}</div>`;
+      })
+      .join("");
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Comanda anulada</title>
+<style>@media print{@page{margin:4mm;size:80mm auto}}body{font-family:monospace;font-size:13px;width:72mm;margin:0 auto}
+h1{font-size:16px;text-align:center;margin:0;color:#b91c1c}.meta{font-size:12px;margin:4px 0}hr{border:none;border-top:2px dashed #000}
+</style></head><body>
+<h1>⛔ ANULADO COCINA</h1>
+<div class="meta"><strong>${data.tableLabel}</strong></div>
+<div class="meta">Mesero: ${data.waiterName} · ${data.guestsCount ?? "?"} comensales</div>
+<div class="meta">${data.printedAt}</div>
+${data.reason ? `<div class="meta"><strong>Motivo:</strong> ${data.reason}</div>` : ""}
+<hr>${rows || "<p>Sin ítems</p>"}<hr>
+<div style="text-align:center;font-size:11px;color:#b91c1c"><strong>NO PREPARAR</strong></div>
+<script>window.onload=()=>window.print()</script></body></html>`;
+  }
+
+  async getKitchenVoidEscPosBase64(branchId: string, invoiceId: string): Promise<{ base64: string; bytes: number }> {
+    const { buildEscPosKitchenVoid } = await import("./escpos.encoder");
+    const data = await this.getKitchenVoidData(branchId, invoiceId);
+    const buf = buildEscPosKitchenVoid(data);
+    return { base64: buf.toString("base64"), bytes: buf.length };
+  }
+
+  private async getKitchenData(branchId: string, invoiceId: string) {
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id: invoiceId, branchId },
+      include: {
+        lines: true,
+        tableSession: { include: { table: { include: { area: true } } } },
+      },
+    });
+    if (!invoice) throw new NotFoundException("Comanda no encontrada");
+
+    let waiterName = "—";
+    if (invoice.waiterId) {
+      const w = await this.prisma.staff.findUnique({ where: { id: invoice.waiterId } });
+      if (w) waiterName = w.name;
+    }
+
+    const table = invoice.tableSession?.table;
+    const tableLabel = table
+      ? `${table.area?.name ?? ""} · Mesa ${table.name}`.trim()
+      : "Mostrador";
+
+    return {
+      tableLabel,
+      waiterName,
+      guestsCount: invoice.guestsCount ?? undefined,
+      lines: invoice.lines.map((l) => ({
+        qty: String(l.qty),
+        name: l.nameSnapshot,
+        notes: l.lineNotes ?? undefined,
+      })),
+      printedAt: new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" }),
+    };
+  }
+
+  private async getKitchenVoidData(branchId: string, invoiceId: string) {
+    const base = await this.getKitchenData(branchId, invoiceId);
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id: invoiceId, branchId },
+      select: { notes: true, serviceType: true, pickupCode: true, pickupName: true, deliveryName: true, tableSessionId: true },
+    });
+    if (!invoice) throw new NotFoundException("Comanda no encontrada");
+
+    let tableLabel = base.tableLabel;
+    if (!invoice.tableSessionId) {
+      if (invoice.serviceType === "delivery") {
+        tableLabel = `Domicilio · ${invoice.deliveryName ?? "Sin nombre"}`;
+      } else if (invoice.serviceType === "takeaway") {
+        const code = invoice.pickupCode ? ` #${invoice.pickupCode}` : "";
+        const name = invoice.pickupName ? ` · ${invoice.pickupName}` : "";
+        tableLabel = `Para llevar${code}${name}`;
+      } else {
+        const code = invoice.pickupCode ? ` #${invoice.pickupCode}` : "";
+        const name = invoice.pickupName ? ` · ${invoice.pickupName}` : "";
+        tableLabel = `Mostrador${code}${name}`;
+      }
+    }
+
+    const reasonLine = invoice.notes?.split("\n").find((line) => line.startsWith("[Anulado]"));
+    const reason = reasonLine?.replace("[Anulado]", "").trim() || undefined;
+
+    return {
+      ...base,
+      tableLabel,
+      reason,
+    };
+  }
+
+  async getSeatingSlipEscPosBase64(branchId: string, sessionId: string, reservationId?: string) {
+    const { buildEscPosSeatingSlip } = await import("./escpos.encoder");
+    const data = await this.getSeatingSlipData(branchId, sessionId, reservationId);
+    const buf = buildEscPosSeatingSlip(data);
+    return { base64: buf.toString("base64"), bytes: buf.length };
+  }
+
+  async getSeatingSlipHtml(branchId: string, sessionId: string, reservationId?: string): Promise<string> {
+    const data = await this.getSeatingSlipData(branchId, sessionId, reservationId);
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Reserva en mesa</title>
+<style>@media print{@page{margin:4mm;size:80mm auto}}body{font-family:monospace;font-size:13px;width:72mm;margin:0 auto}
+h1{font-size:16px;text-align:center;margin:0}.meta{font-size:12px;margin:4px 0}hr{border:none;border-top:2px dashed #000}
+</style></head><body>
+<h1>📅 RESERVA · CLIENTE EN MESA</h1>
+<div class="meta"><strong>${data.tableLabel}</strong></div>
+<div class="meta">Mesero: ${data.waiterName} · ${data.guestsCount} comensales</div>
+<div class="meta">Cliente: ${data.customerName}${data.customerPhone ? ` · ${data.customerPhone}` : ""}</div>
+${data.reservedFor ? `<div class="meta">Hora reserva: ${data.reservedFor}</div>` : ""}
+<div class="meta">${data.printedAt}</div>
+${data.notes ? `<hr><div class="meta">Notas: ${data.notes}</div>` : ""}
+<hr><div style="text-align:center;font-size:11px">YallPos</div>
+<script>window.onload=()=>window.print()</script></body></html>`;
+  }
+
+  private async getSeatingSlipData(branchId: string, sessionId: string, reservationId?: string) {
+    const session = await this.prisma.tableSession.findFirst({
+      where: { id: sessionId, branchId },
+      include: { table: { include: { area: true } } },
+    });
+    if (!session) throw new NotFoundException("Sesion de mesa no encontrada");
+
+    const reservation = reservationId
+      ? await this.prisma.reservation.findFirst({ where: { id: reservationId, branchId } })
+      : session.id
+        ? await this.prisma.reservation.findFirst({
+            where: { branchId, tableSessionId: sessionId },
+            orderBy: { seatedAt: "desc" },
+          })
+        : null;
+
+    let waiterName = "—";
+    if (session.waiterId) {
+      const w = await this.prisma.staff.findUnique({ where: { id: session.waiterId } });
+      if (w) waiterName = w.name;
+    }
+
+    const table = session.table;
+    const tableLabel = table
+      ? `${table.area?.name ?? ""} · Mesa ${table.name}`.trim()
+      : "Mesa";
+
+    const reservedFor = reservation?.reservedFor
+      ? new Date(reservation.reservedFor).toLocaleString("es-CO", { timeZone: "America/Bogota" })
+      : undefined;
+
+    return {
+      tableLabel,
+      waiterName,
+      guestsCount: session.guestsCount ?? reservation?.guestsCount ?? 1,
+      customerName: reservation?.customerName ?? "Cliente",
+      customerPhone: reservation?.customerPhone ?? undefined,
+      notes: reservation?.notes ?? undefined,
+      reservedFor,
+      printedAt: new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" }),
+    };
+  }
+
+  async incrementPrintCount(invoiceId: string) {
+    await this.prisma.salesInvoice.update({
+      where: { id: invoiceId },
+      data: { printedCount: { increment: 1 } },
+    });
+  }
+}

@@ -1,0 +1,302 @@
+/**
+ * Codificador ESC/POS para impresoras térmicas 58mm/80mm.
+ * Compatible con Epson, Star, Bixolon y la mayoría de clones.
+ */
+export class EscPosEncoder {
+  private buffer: number[] = [];
+
+  private append(...bytes: number[]) {
+    this.buffer.push(...bytes);
+  }
+
+  private text(str: string) {
+    for (let i = 0; i < str.length; i++) {
+      this.buffer.push(str.charCodeAt(i) & 0xff);
+    }
+  }
+
+  init() {
+    this.append(0x1b, 0x40); // ESC @
+    return this;
+  }
+
+  align(mode: "left" | "center" | "right") {
+    const n = mode === "left" ? 0 : mode === "center" ? 1 : 2;
+    this.append(0x1b, 0x61, n);
+    return this;
+  }
+
+  bold(on = true) {
+    this.append(0x1b, 0x45, on ? 1 : 0);
+    return this;
+  }
+
+  size(width = 1, height = 1) {
+    const n = ((width - 1) << 4) | (height - 1);
+    this.append(0x1d, 0x21, n);
+    return this;
+  }
+
+  line(str = "") {
+    this.text(str);
+    this.append(0x0a);
+    return this;
+  }
+
+  separator(char = "-", width = 32) {
+    return this.line(char.repeat(width));
+  }
+
+  cut() {
+    this.append(0x1d, 0x56, 0x00); // GS V 0 — corte total
+    return this;
+  }
+
+  feed(lines = 3) {
+    for (let i = 0; i < lines; i++) this.append(0x0a);
+    return this;
+  }
+
+  toBuffer(): Buffer {
+    return Buffer.from(this.buffer);
+  }
+
+  toBase64(): string {
+    return this.toBuffer().toString("base64");
+  }
+}
+
+export type ReceiptLine = { name: string; qty: string; total: number };
+
+export type ReceiptData = {
+  businessName: string;
+  nit: string;
+  branchName: string;
+  address?: string;
+  phone?: string;
+  docNumber?: string;
+  cude?: string;
+  isContingency?: boolean;
+  simulationMode?: boolean;
+  tableLabel?: string;
+  waiterName?: string;
+  guestsCount?: number;
+  lines: ReceiptLine[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  payments: { method: string; amount: number }[];
+  tip?: number;
+  cashier?: string;
+  printedAt: string;
+};
+
+export function buildEscPosReceipt(data: ReceiptData, paperWidth = 32): Buffer {
+  const enc = new EscPosEncoder().init();
+
+  enc.align("center").bold(true).size(2, 2).line(data.businessName).size(1, 1).bold(false);
+  enc.line(`NIT: ${data.nit}`);
+  enc.line(data.branchName);
+  if (data.address) enc.line(data.address);
+  enc.separator("=", paperWidth);
+
+  enc.align("left").bold(true);
+  if (data.simulationMode) {
+    enc.line("COMPROBANTE INTERNO").line("NO VALIDO FISCAL");
+  } else {
+    enc.line("DOCUMENTO EQUIVALENTE POS");
+  }
+  enc.bold(false);
+  if (data.tableLabel) enc.line(`Mesa: ${data.tableLabel}`);
+  if (data.waiterName) enc.line(`Mesero: ${data.waiterName}`);
+  if (data.guestsCount) enc.line(`Comensales: ${data.guestsCount}`);
+  if (data.docNumber && !data.simulationMode) enc.line(`No: ${data.docNumber}`);
+  if (data.cude && !data.simulationMode) enc.line(`CUDE: ${data.cude.slice(0, 16)}...`);
+  if (data.simulationMode && data.docNumber) enc.line(`Ref: ${data.docNumber}`);
+  if (data.isContingency) enc.bold(true).line("** CONTINGENCIA **").bold(false);
+  enc.line(`Fecha: ${data.printedAt}`);
+  enc.separator("-", paperWidth);
+
+  for (const l of data.lines) {
+    const name = l.name.length > 22 ? l.name.slice(0, 22) : l.name;
+    enc.line(`${name}`);
+    enc.line(`  ${l.qty} x $${l.total.toLocaleString("es-CO")}`);
+  }
+
+  enc.separator("-", paperWidth);
+  enc.line(`Subtotal: $${data.subtotal.toLocaleString("es-CO")}`);
+  enc.line(`IVA:      $${data.tax.toLocaleString("es-CO")}`);
+  if (data.tip) enc.line(`Propina:  $${data.tip.toLocaleString("es-CO")}`);
+  enc.bold(true).line(`TOTAL:    $${data.total.toLocaleString("es-CO")}`).bold(false);
+
+  enc.separator("-", paperWidth);
+  for (const p of data.payments) {
+    enc.line(`${p.method.toUpperCase()}: $${p.amount.toLocaleString("es-CO")}`);
+  }
+
+  enc.separator("=", paperWidth);
+  enc.align("center").line("Gracias por su compra");
+  enc.line("YallPos · yallpos.co");
+  enc.feed(2).cut();
+
+  return enc.toBuffer();
+}
+
+export type KitchenTicketData = {
+  tableLabel: string;
+  waiterName: string;
+  guestsCount?: number;
+  lines: { qty: string; name: string; notes?: string }[];
+  printedAt: string;
+};
+
+export type KitchenVoidTicketData = KitchenTicketData & {
+  reason?: string;
+};
+
+export function buildEscPosKitchen(data: KitchenTicketData, paperWidth = 32): Buffer {
+  const enc = new EscPosEncoder().init();
+
+  enc.align("center").bold(true).size(2, 2).line("COMANDA").size(1, 1).bold(false);
+  enc.line("COCINA");
+  enc.separator("=", paperWidth);
+  enc.align("left").bold(true).line(data.tableLabel).bold(false);
+  enc.line(`Mesero: ${data.waiterName}`);
+  if (data.guestsCount) enc.line(`Comensales: ${data.guestsCount}`);
+  enc.line(data.printedAt);
+  enc.separator("-", paperWidth);
+
+  for (const l of data.lines) {
+    enc.bold(true).line(`${l.qty}x ${l.name}`).bold(false);
+    if (l.notes) enc.line(`  > ${l.notes}`);
+  }
+
+  enc.separator("=", paperWidth);
+  enc.align("center").line("YallPos");
+  enc.feed(2).cut();
+  return enc.toBuffer();
+}
+
+export function buildEscPosKitchenVoid(data: KitchenVoidTicketData, paperWidth = 32): Buffer {
+  const enc = new EscPosEncoder().init();
+
+  enc.align("center").bold(true).size(2, 2).line("ANULADO").size(1, 1).bold(false);
+  enc.line("COCINA");
+  enc.separator("=", paperWidth);
+  enc.align("left").bold(true).line(data.tableLabel).bold(false);
+  enc.line(`Mesero: ${data.waiterName}`);
+  if (data.guestsCount) enc.line(`Comensales: ${data.guestsCount}`);
+  enc.line(data.printedAt);
+  if (data.reason) enc.line(`Motivo: ${data.reason}`);
+  enc.separator("-", paperWidth);
+
+  for (const l of data.lines) {
+    enc.bold(true).line(`${l.qty}x ${l.name}`).bold(false);
+    if (l.notes) enc.line(`  > ${l.notes}`);
+  }
+
+  enc.separator("=", paperWidth);
+  enc.align("center").line("NO PREPARAR");
+  enc.feed(2).cut();
+  return enc.toBuffer();
+}
+
+export type SeatingSlipData = {
+  tableLabel: string;
+  waiterName: string;
+  guestsCount: number;
+  customerName: string;
+  customerPhone?: string;
+  notes?: string;
+  reservedFor?: string;
+  printedAt: string;
+};
+
+export function buildEscPosSeatingSlip(data: SeatingSlipData, paperWidth = 32): Buffer {
+  const enc = new EscPosEncoder().init();
+
+  enc.align("center").bold(true).size(2, 2).line("RESERVA").size(1, 1).bold(false);
+  enc.line("CLIENTE EN MESA");
+  enc.separator("=", paperWidth);
+  enc.align("left").bold(true).line(data.tableLabel).bold(false);
+  enc.line(`Mesero: ${data.waiterName}`);
+  enc.line(`Comensales: ${data.guestsCount}`);
+  enc.line(`Cliente: ${data.customerName}`);
+  if (data.customerPhone) enc.line(`Tel: ${data.customerPhone}`);
+  if (data.reservedFor) enc.line(`Reserva: ${data.reservedFor}`);
+  enc.line(data.printedAt);
+  if (data.notes) {
+    enc.separator("-", paperWidth);
+    enc.line(`Notas: ${data.notes}`);
+  }
+  enc.separator("=", paperWidth);
+  enc.align("center").line("YallPos");
+  enc.feed(2).cut();
+  return enc.toBuffer();
+}
+
+export type ReportXData = {
+  businessName: string;
+  branchName: string;
+  openedAt: string;
+  openingCash: number;
+  totalSales: number;
+  totalTips: number;
+  expectedCash: number;
+  invoiceCount: number;
+  paymentsByMethod: Record<string, number>;
+  printedAt: string;
+};
+
+const PAYMENT_LABELS: Record<string, string> = {
+  cash: "Efectivo",
+  card: "Tarjeta",
+  transfer: "Transferencia",
+  qr: "QR",
+  credit: "Credito",
+  voucher: "Vale",
+  mixed: "Mixto",
+};
+
+export function buildEscPosReportX(data: ReportXData, paperWidth = 32): Buffer {
+  const enc = new EscPosEncoder().init();
+
+  enc.align("center").bold(true).size(2, 2).line("REPORTE X").size(1, 1).bold(false);
+  enc.line(data.businessName);
+  enc.line(data.branchName);
+  enc.separator("=", paperWidth);
+  enc.align("left");
+  enc.line(`Apertura: ${data.openedAt}`);
+  enc.line(`Impreso:  ${data.printedAt}`);
+  enc.separator("-", paperWidth);
+  enc.line(`Ventas:        $${data.totalSales.toLocaleString("es-CO")}`);
+  enc.line(`Transacciones: ${data.invoiceCount}`);
+  enc.line(`Propinas:      $${data.totalTips.toLocaleString("es-CO")}`);
+  enc.line(`Apertura caja: $${data.openingCash.toLocaleString("es-CO")}`);
+  enc.line(`Efectivo esp.: $${data.expectedCash.toLocaleString("es-CO")}`);
+  enc.separator("-", paperWidth);
+  enc.bold(true).line("Medios de pago").bold(false);
+  for (const [method, amount] of Object.entries(data.paymentsByMethod)) {
+    const label = PAYMENT_LABELS[method] ?? method;
+    enc.line(`${label}: $${amount.toLocaleString("es-CO")}`);
+  }
+  enc.separator("=", paperWidth);
+  enc.align("center").line("Caja abierta — no es cierre Z");
+  enc.feed(2).cut();
+  return enc.toBuffer();
+}
+
+export function buildEscPosTest(): Buffer {
+  return buildEscPosReceipt({
+    businessName: "YallPos Test",
+    nit: "900123456-7",
+    branchName: "Restaurante de Yall",
+    simulationMode: true,
+    lines: [{ name: "Producto prueba", qty: "1", total: 5000 }],
+    subtotal: 4202,
+    tax: 798,
+    total: 5000,
+    payments: [{ method: "cash", amount: 5000 }],
+    printedAt: new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" }),
+  });
+}

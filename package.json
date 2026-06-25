@@ -1,0 +1,14 @@
+{
+  "name": "yallpos",
+  "private": true,
+  "version": "0.1.0",
+  "description": "YallPos — POS moderno para restaurantes y panaderías en Colombia",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "devDependencies": {
+    "browserslist": "^4.28.2",
+    "caniuse-lite": "^1.0.30001669"
+  }
+}
