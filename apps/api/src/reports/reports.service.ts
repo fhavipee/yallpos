@@ -160,12 +160,14 @@ export class ReportsService {
       .sort(([a], [b]) => a - b)
       .map(([hour, total]) => ({ hour, total }));
 
-    const waiterMap = new Map<string, { waiterId: string; name: string; sales: number; tips: number; count: number }>();
+    const waiterMap = new Map<string, { waiterId: string | null; waiterUserId: string | null; name: string; sales: number; tips: number; count: number }>();
     for (const inv of paidInvoices) {
-      if (!inv.waiterId) continue;
-      const cur = waiterMap.get(inv.waiterId) ?? {
+      const key = inv.waiterId ? `staff:${inv.waiterId}` : inv.waiterUserId ? `user:${inv.waiterUserId}` : null;
+      if (!key) continue;
+      const cur = waiterMap.get(key) ?? {
         waiterId: inv.waiterId,
-        name: inv.waiterId,
+        waiterUserId: inv.waiterUserId,
+        name: key,
         sales: 0,
         tips: 0,
         count: 0,
@@ -173,17 +175,25 @@ export class ReportsService {
       cur.sales += Number(inv.total);
       cur.tips += Number(inv.tipAmount);
       cur.count += 1;
-      waiterMap.set(inv.waiterId, cur);
+      waiterMap.set(key, cur);
     }
 
     if (waiterMap.size) {
-      const waiters = await this.prisma.staff.findMany({
-        where: { branchId, id: { in: [...waiterMap.keys()] } },
-        select: { id: true, name: true },
-      });
-      for (const w of waiters) {
-        const row = waiterMap.get(w.id);
-        if (row) row.name = w.name;
+      const staffIds = [...waiterMap.values()].map((w) => w.waiterId).filter((id): id is string => !!id);
+      const userIds = [...waiterMap.values()].map((w) => w.waiterUserId).filter((id): id is string => !!id);
+      const [staffRows, userRows] = await Promise.all([
+        staffIds.length
+          ? this.prisma.staff.findMany({ where: { branchId, id: { in: staffIds } }, select: { id: true, name: true } })
+          : [],
+        userIds.length
+          ? this.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, name: true } })
+          : [],
+      ]);
+      const staffNameMap = new Map(staffRows.map((w) => [w.id, w.name]));
+      const userNameMap = new Map(userRows.map((u) => [u.id, u.name]));
+      for (const row of waiterMap.values()) {
+        if (row.waiterId && staffNameMap.has(row.waiterId)) row.name = staffNameMap.get(row.waiterId)!;
+        else if (row.waiterUserId && userNameMap.has(row.waiterUserId)) row.name = userNameMap.get(row.waiterUserId)!;
       }
     }
 

@@ -94,10 +94,10 @@ export class PosService {
         include: invoiceInclude,
       });
       if (!selected) throw new NotFoundException("Comanda no encontrada");
-      if (selected.waiterId !== ts.waiterId) {
+      if (selected.waiterId !== ts.waiterId || selected.waiterUserId !== ts.waiterUserId) {
         return this.prisma.salesInvoice.update({
           where: { id: selected.id },
-          data: { waiterId: ts.waiterId },
+          data: { waiterId: ts.waiterId, waiterUserId: ts.waiterUserId },
           include: invoiceInclude,
         });
       }
@@ -111,10 +111,10 @@ export class PosService {
     });
 
     if (existing) {
-      if (existing.waiterId !== ts.waiterId) {
+      if (existing.waiterId !== ts.waiterId || existing.waiterUserId !== ts.waiterUserId) {
         return this.prisma.salesInvoice.update({
           where: { id: existing.id },
-          data: { waiterId: ts.waiterId },
+          data: { waiterId: ts.waiterId, waiterUserId: ts.waiterUserId },
           include: invoiceInclude,
         });
       }
@@ -131,6 +131,7 @@ export class PosService {
         tableSessionId,
         tableId: ts.tableId,
         waiterId: ts.waiterId,
+        waiterUserId: ts.waiterUserId,
         guestsCount: ts.guestsCount ?? null,
       },
       include: invoiceInclude,
@@ -192,6 +193,7 @@ export class PosService {
 
     let tableId: string | null = null;
     let waiterId: string | null = null;
+    let waiterUserId: string | null = null;
     let guestsCount: number | null = null;
 
     if (dto.tableSessionId) {
@@ -199,6 +201,7 @@ export class PosService {
       if (!ts || ts.status !== "open") throw new BadRequestException("Invalid table session");
       tableId = ts.tableId;
       waiterId = ts.waiterId;
+      waiterUserId = ts.waiterUserId;
       guestsCount = ts.guestsCount ?? null;
     }
 
@@ -214,6 +217,7 @@ export class PosService {
         tableSessionId: dto.tableSessionId ?? null,
         tableId,
         waiterId,
+        waiterUserId,
         guestsCount,
         notes: dto.notes ?? null,
       },

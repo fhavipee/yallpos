@@ -11,6 +11,8 @@ import {
   buildReservationWhatsAppMessageText,
 } from "./reservation-notify.util";
 import { KdsService } from "../kds/kds.service";
+import { WaiterAttributionService } from "./waiter-attribution.service";
+import { WaiterAttributionDto } from "./dto/open-table-session.dto";
 
 type DailyMenuSettings = {
   date: string;
@@ -20,7 +22,11 @@ type DailyMenuSettings = {
 
 @Injectable()
 export class RestaurantService {
-  constructor(private prisma: PrismaService, private kds: KdsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private kds: KdsService,
+    private waiterAttr: WaiterAttributionService,
+  ) {}
 
   private emitTableMapUpdated(
     branchId: string,
@@ -382,6 +388,12 @@ export class RestaurantService {
   }
 
   async getTables(branchId: string, areaId?: string) {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      include: { company: true },
+    });
+    if (!branch) throw new NotFoundException("Sucursal no encontrada");
+
     const tables = await this.prisma.table.findMany({
       where: { branchId, isActive: true, ...(areaId ? { diningAreaId: areaId } : {}) },
       orderBy: [{ diningAreaId: "asc" }, { name: "asc" }],
@@ -409,6 +421,12 @@ export class RestaurantService {
       },
     });
 
+    const nameFor = await this.waiterAttr.resolveDisplayNames(
+      branchId,
+      branch.company.tenantId,
+      tables.flatMap((t) => t.sessions),
+    );
+
     return tables.map((table) => ({
       ...table,
       sessions: table.sessions.map((session) => {
@@ -426,6 +444,8 @@ export class RestaurantService {
           id: session.id,
           guestsCount: session.guestsCount,
           waiterId: session.waiterId,
+          waiterUserId: session.waiterUserId,
+          waiterName: nameFor(session),
           openInvoiceCount: session.invoices.length,
           canClose: !hasActiveOrder,
           kitchenReadyPending,
@@ -464,17 +484,26 @@ export class RestaurantService {
   }
 
   async openTableSession(branchId: string, dto: OpenTableSessionDto, openedByUserId?: string) {
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      include: { company: true },
+    });
+    if (!branch) throw new NotFoundException("Sucursal no encontrada");
+
     const table = await this.prisma.table.findFirst({ where: { id: dto.tableId, branchId, isActive: true } });
     if (!table) throw new NotFoundException("Table not found");
 
     const existing = await this.prisma.tableSession.findFirst({ where: { branchId, tableId: dto.tableId, status: "open" }});
     if (existing) throw new BadRequestException("Table already has an open session");
 
+    const attribution = await this.waiterAttr.resolve(branchId, branch.company.tenantId, dto);
+
     const session = await this.prisma.tableSession.create({
       data: {
         branchId,
         tableId: dto.tableId,
-        waiterId: dto.waiterId,
+        waiterId: attribution.waiterId,
+        waiterUserId: attribution.waiterUserId,
         status: "open",
         guestsCount: dto.guestsCount,
         openedByUserId,
@@ -488,6 +517,37 @@ export class RestaurantService {
     });
 
     return session;
+  }
+
+  async assignSessionWaiter(
+    branchId: string,
+    sessionId: string,
+    tenantId: string,
+    dto: WaiterAttributionDto,
+  ) {
+    const session = await this.prisma.tableSession.findFirst({ where: { id: sessionId, branchId } });
+    if (!session) throw new NotFoundException("Table session not found");
+    if (session.status !== "open") throw new BadRequestException("Solo sesiones abiertas");
+
+    const attribution = await this.waiterAttr.resolve(branchId, tenantId, dto);
+
+    const updated = await this.prisma.tableSession.update({
+      where: { id: sessionId },
+      data: {
+        waiterId: attribution.waiterId,
+        waiterUserId: attribution.waiterUserId,
+      },
+    });
+
+    await this.waiterAttr.applyToOpenInvoices(branchId, sessionId, attribution);
+
+    this.emitTableMapUpdated(branchId, {
+      tableId: session.tableId,
+      tableSessionId: sessionId,
+      status: "updated",
+    });
+
+    return updated;
   }
 
   async transferWaiter(branchId: string, sessionId: string, dto: TransferWaiterDto) {
@@ -504,7 +564,7 @@ export class RestaurantService {
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.tableSession.update({
         where: { id: sessionId },
-        data: { waiterId: dto.newWaiterId },
+        data: { waiterId: dto.newWaiterId, waiterUserId: null },
       });
 
       const openInvoices = await tx.salesInvoice.findMany({
@@ -519,7 +579,7 @@ export class RestaurantService {
       if (openInvoices.length) {
         await tx.salesInvoice.updateMany({
           where: { id: { in: openInvoices.map((i) => i.id) } },
-          data: { waiterId: dto.newWaiterId },
+          data: { waiterId: dto.newWaiterId, waiterUserId: null },
         });
         await tx.kdsTicket.updateMany({
           where: { invoiceId: { in: openInvoices.map((i) => i.id) } },

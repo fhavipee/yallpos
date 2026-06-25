@@ -1,11 +1,22 @@
 import { IsInt, IsOptional, IsString, Min } from "class-validator";
 
-export class OpenTableSessionDto {
+export class WaiterAttributionDto {
+  @IsOptional()
+  @IsString()
+  waiterId?: string;
+
+  @IsOptional()
+  @IsString()
+  waiterStaffId?: string;
+
+  @IsOptional()
+  @IsString()
+  waiterUserId?: string;
+}
+
+export class OpenTableSessionDto extends WaiterAttributionDto {
   @IsString()
   tableId!: string;
-
-  @IsString()
-  waiterId!: string;
 
   @IsOptional()
   @IsInt()

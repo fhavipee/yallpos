@@ -6,6 +6,8 @@ import { dispatchTableUpdated, TABLE_READY_EVENT, TABLE_SERVED_EVENT, type Table
 import PaymentModal from "../components/PaymentModal";
 import { useBarcodeScanner } from "../lib/barcode";
 import { useTheme } from "../lib/theme";
+import type { WaiterIdentity } from "../lib/pin";
+import { assignTableWaiter } from "../lib/waiterAttribution";
 
 type Product = {
   id: string;
@@ -22,10 +24,12 @@ export default function Order({
   branchId,
   tableSessionId,
   onPaid,
+  activeWaiter,
 }: {
   branchId: string;
   tableSessionId: string;
   onPaid?: () => void;
+  activeWaiter?: WaiterIdentity | null;
 }) {
   const { productCardBg } = useTheme();
   const [invoice, setInvoice] = useState<any>(null);
@@ -97,6 +101,14 @@ export default function Order({
   async function loadSession(preferredInvoiceId?: string) {
     if (!tableSessionId) return;
     try {
+      if (activeWaiter) {
+        try {
+          await assignTableWaiter(tableSessionId, activeWaiter);
+        } catch {
+          // la sesión puede seguir con otro mesero hasta confirmar PIN
+        }
+      }
+
       const listRes = await api.get(`/v1/pos/table-sessions/${tableSessionId}/invoices`);
       const list = listRes.data as any[];
       setOpenInvoices(list);
@@ -133,7 +145,7 @@ export default function Order({
     await loadSession(activeInvoiceId || undefined);
   }
 
-  useEffect(() => { loadSession(); }, [tableSessionId]);
+  useEffect(() => { loadSession(); }, [tableSessionId, activeWaiter?.id, activeWaiter?.kind]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -190,7 +202,9 @@ export default function Order({
   }, [invoice]);
 
   const currentWaiterId = invoice?.tableSession?.waiterId ?? invoice?.waiterId;
-  const currentWaiterName = waiters.find((w) => w.id === currentWaiterId)?.name ?? "Mesero";
+  const currentWaiterName = activeWaiter?.name
+    ?? waiters.find((w) => w.id === currentWaiterId)?.name
+    ?? "Mesero";
 
   useEffect(() => {
     api.get("/v1/restaurant/daily-menu").then((r) => setDailyMenu(r.data)).catch(() => {});

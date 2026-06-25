@@ -3,7 +3,7 @@ import { BranchId } from "../common/decorators/branch-id.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { AuthUser, FLOOR_ROLES, MANAGEMENT_ROLES } from "../auth/auth.types";
-import { OpenTableSessionDto } from "./dto/open-table-session.dto";
+import { OpenTableSessionDto, WaiterAttributionDto } from "./dto/open-table-session.dto";
 import { TransferWaiterDto } from "./dto/transfer-waiter.dto";
 import { CreateReservationDto } from "./dto/create-reservation.dto";
 import { UpdateReservationDto } from "./dto/update-reservation.dto";
@@ -51,6 +51,17 @@ export class RestaurantController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.service.openTableSession(branchId, dto, user.id);
+  }
+
+  @Roles(...FLOOR_ROLES)
+  @Post("table-sessions/:id/assign-waiter")
+  assignWaiter(
+    @BranchId() branchId: string,
+    @Param("id") id: string,
+    @Body() dto: WaiterAttributionDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.service.assignSessionWaiter(branchId, id, user.tenantId, dto);
   }
 
   @Roles(...FLOOR_ROLES)

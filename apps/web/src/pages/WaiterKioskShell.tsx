@@ -168,11 +168,16 @@ export default function WaiterKioskShell({
       >
         <p className="yall-swipe-hint yall-hide-desktop">Desliza ← → entre Mesas y Comanda</p>
         {tab === "tables" && (
-          <Tables branchId={branchId} active onOpenOrder={openOrder} />
+          <Tables branchId={branchId} active onOpenOrder={openOrder} activeWaiter={activeWaiter} />
         )}
         {tab === "order" && (
           tableSessionId ? (
-            <Order branchId={branchId} tableSessionId={tableSessionId} onPaid={closeOrder} />
+            <Order
+              branchId={branchId}
+              tableSessionId={tableSessionId}
+              onPaid={closeOrder}
+              activeWaiter={activeWaiter}
+            />
           ) : (
             <div style={{
               textAlign: "center",

@@ -3,6 +3,8 @@ import { api, setBranchId, formatCOP } from "../lib/api";
 import { printSeatingSlip as printSeatingSlipTicket } from "../lib/print";
 import { notifyOverdueTables, type OverdueTableRow } from "../lib/tableServiceReport";
 import { TABLE_UPDATED_EVENT, TABLE_READY_EVENT, TABLE_SERVED_EVENT, dispatchTableUpdated, type TableUpdatedDetail, type TableReadyDetail, type TableServedDetail } from "../lib/kdsSocket";
+import type { WaiterIdentity } from "../lib/pin";
+import { toWaiterApiBody } from "../lib/waiterAttribution";
 
 type SessionInvoice = {
   id: string;
@@ -15,6 +17,8 @@ type TableSession = {
   id: string;
   guestsCount?: number;
   waiterId?: string;
+  waiterUserId?: string;
+  waiterName?: string;
   openInvoiceCount?: number;
   canClose?: boolean;
   kitchenReadyPending?: boolean;
@@ -64,10 +68,12 @@ export default function Tables({
   branchId,
   active,
   onOpenOrder,
+  activeWaiter,
 }: {
   branchId: string;
   active?: boolean;
   onOpenOrder: (sessionId: string) => void;
+  activeWaiter?: WaiterIdentity | null;
 }) {
   const [tables, setTables] = useState<Table[]>([]);
   const [waiters, setWaiters] = useState<{ id: string; name: string }[]>([]);
@@ -308,7 +314,7 @@ export default function Tables({
           tableId: t.id,
           sessionId: session.id,
           label: `${t.area?.name ? `${t.area.name} · ` : ""}Mesa ${t.name}`,
-          waiter: waiters.find((w) => w.id === session.waiterId)?.name ?? "Mesero",
+          waiter: session.waiterName ?? waiters.find((w) => w.id === session.waiterId)?.name ?? "Mesero",
           guests: session.guestsCount,
           total: Number(invoice?.total ?? 0),
           inKitchen: invoice?.status === "sent_to_kitchen",
@@ -319,11 +325,18 @@ export default function Tables({
       .sort((a, b) => b.total - a.total);
   }, [tables, waiters]);
 
+  useEffect(() => {
+    if (activeWaiter?.kind === "staff") setWaiterId(activeWaiter.id);
+  }, [activeWaiter]);
+
   async function openSession(tableId: string) {
-    if (!waiterId) return alert("Selecciona un mesero");
+    const attribution = toWaiterApiBody(activeWaiter);
+    if (!attribution && !waiterId) return alert("Selecciona un mesero o identifícate con PIN");
     try {
       const res = await api.post("/v1/restaurant/table-sessions/open", {
-        tableId, waiterId, guestsCount: guests,
+        tableId,
+        guestsCount: guests,
+        ...(attribution ?? { waiterId }),
       });
       setOpening(null);
       onOpenOrder(res.data.id);
@@ -1004,12 +1017,18 @@ export default function Tables({
               Comensales
               <input type="number" value={guests} onChange={(e) => setGuests(Number(e.target.value))} style={{ padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)" }} />
             </label>
-            <label style={{ display: "grid", gap: 6, fontSize: 14 }}>
-              Mesero
-              <select value={waiterId} onChange={(e) => setWaiterId(e.target.value)} style={{ padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}>
-                {waiters.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-              </select>
-            </label>
+            {activeWaiter ? (
+              <p style={{ fontSize: 14, color: "var(--t-muted)", margin: "0 0 12px" }}>
+                Mesero: <strong>{activeWaiter.name}</strong>
+              </p>
+            ) : (
+              <label style={{ display: "grid", gap: 6, fontSize: 14 }}>
+                Mesero
+                <select value={waiterId} onChange={(e) => setWaiterId(e.target.value)} style={{ padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}>
+                  {waiters.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+              </label>
+            )}
             <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
               <button onClick={() => setOpening(null)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>Cancelar</button>
               <button onClick={() => openSession(opening)} style={{ flex: 1, padding: 10, borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}>Abrir</button>

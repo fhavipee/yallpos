@@ -160,6 +160,7 @@ model Staff {
   name      String
   phone     String?
   pinHash   String?
+  userId    String?
   role      StaffRole
   isActive  Boolean   @default(true)
 
@@ -447,7 +448,8 @@ model TableSession {
   id             String             @id @default(uuid())
   branchId       String
   tableId        String
-  waiterId       String
+  waiterId       String?
+  waiterUserId   String?
   status         TableSessionStatus
   openedAt       DateTime           @default(now())
   closedAt       DateTime?
@@ -551,6 +553,7 @@ model SalesInvoice {
   tableSession   TableSession? @relation(fields: [tableSessionId], references: [id])
   tableId        String?
   waiterId       String?
+  waiterUserId   String?
   guestsCount    Int?
   notes          String?
 
