@@ -53,4 +53,10 @@ export class UpdateBranchSettingsDto {
     /** @deprecated Usar adminPin — se migra automáticamente al guardar */
     waiterExitPin?: string;
   };
+
+  @IsOptional()
+  pos?: {
+    /** Descuento máximo (%) que no requiere PIN de supervisor. */
+    maxDiscountPercentWithoutPin?: number;
+  };
 }

@@ -86,6 +86,7 @@ export class SettingsService {
       ...current,
       ...(dto.printers ? { printers: { ...(current.printers as object ?? {}), ...dto.printers } } : {}),
       ...(dto.notifications ? { notifications: { ...(current.notifications as object ?? {}), ...dto.notifications } } : {}),
+      ...(dto.pos ? { pos: { ...(current.pos as object ?? {}), ...dto.pos } } : {}),
       ...(kioskPatch ? { kiosk: kioskPatch } : {}),
     };
 

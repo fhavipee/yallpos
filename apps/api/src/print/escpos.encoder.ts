@@ -66,7 +66,7 @@ export class EscPosEncoder {
   }
 }
 
-export type ReceiptLine = { name: string; qty: string; total: number };
+export type ReceiptLine = { name: string; qty: string; total: number; modifiers?: string[]; notes?: string };
 
 export type ReceiptData = {
   businessName: string;
@@ -95,6 +95,7 @@ export type ReceiptData = {
   tax: number;
   consumptionTax?: number;
   taxBreakdown?: { label: string; base: number; tax: number }[];
+  discount?: number;
   total: number;
   payments: { method: string; amount: number }[];
   tip?: number;
@@ -142,6 +143,8 @@ export function buildEscPosReceipt(data: ReceiptData, paperWidth = 32): Buffer {
   for (const l of data.lines) {
     const name = l.name.length > 22 ? l.name.slice(0, 22) : l.name;
     enc.line(`${name}`);
+    if (l.modifiers?.length) enc.line(`  + ${l.modifiers.join(" · ")}`);
+    if (l.notes) enc.line(`  > ${l.notes}`);
     enc.line(`  ${l.qty} x $${l.total.toLocaleString("es-CO")}`);
   }
 
@@ -167,6 +170,9 @@ export function buildEscPosReceipt(data: ReceiptData, paperWidth = 32): Buffer {
   if (data.deliveryInfo?.fee) {
     enc.line(`Domicilio: $${data.deliveryInfo.fee.toLocaleString("es-CO")}`);
   }
+  if (data.discount) {
+    enc.line(`Descuento: -$${data.discount.toLocaleString("es-CO")}`);
+  }
   enc.bold(true).line(`TOTAL:    $${data.total.toLocaleString("es-CO")}`).bold(false);
 
   enc.separator("-", paperWidth);
@@ -186,7 +192,7 @@ export type KitchenTicketData = {
   tableLabel: string;
   waiterName: string;
   guestsCount?: number;
-  lines: { qty: string; name: string; notes?: string }[];
+  lines: { qty: string; name: string; modifiers?: string[]; notes?: string }[];
   printedAt: string;
 };
 
@@ -208,6 +214,7 @@ export function buildEscPosKitchen(data: KitchenTicketData, paperWidth = 32): Bu
 
   for (const l of data.lines) {
     enc.bold(true).line(`${l.qty}x ${l.name}`).bold(false);
+    if (l.modifiers?.length) enc.line(`  + ${l.modifiers.join(" · ")}`);
     if (l.notes) enc.line(`  > ${l.notes}`);
   }
 
@@ -232,6 +239,7 @@ export function buildEscPosKitchenVoid(data: KitchenVoidTicketData, paperWidth =
 
   for (const l of data.lines) {
     enc.bold(true).line(`${l.qty}x ${l.name}`).bold(false);
+    if (l.modifiers?.length) enc.line(`  + ${l.modifiers.join(" · ")}`);
     if (l.notes) enc.line(`  > ${l.notes}`);
   }
 

@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { api, setBranchId, formatCOP } from "../lib/api";
-import { printInvoiceReceipt, printKitchenVoidTicket } from "../lib/print";
+import { printInvoiceReceipt, printKitchenLineVoidEscpos, printKitchenVoidTicket } from "../lib/print";
 import { useBarcodeScanner } from "../lib/barcode";
 import CategoryPicker from "../components/CategoryPicker";
+import ModifierPickerModal from "../components/ModifierPickerModal";
 import PaymentModal from "../components/PaymentModal";
+import InvoiceDiscountModal from "../components/InvoiceDiscountModal";
 import { ui, useTheme } from "../lib/theme";
 import { formatPickupDisplay, formatPickupLabel } from "../lib/pickupCode";
+import { LINE_VOIDED_EVENT, INVOICE_UPDATED_EVENT, type LineVoidedDetail, type InvoiceUpdatedDetail } from "../lib/kdsSocket";
+import { discountPercentFromAmount, discountPinErrorMessage, isDiscountPinRequiredError, needsDiscountPin } from "../lib/discountPin";
+import PinPromptModal from "../components/PinPromptModal";
 
 type Product = {
   id: string;
@@ -13,6 +18,15 @@ type Product = {
   categoryId?: string;
   variants: { id: string; name: string; price: string; sellByWeight: boolean; unit: string; barcode?: string }[];
   category?: { id: string; name: string; color?: string };
+  modifierGroups?: {
+    modifierGroup: {
+      id: string;
+      name: string;
+      minSelect: number;
+      maxSelect: number;
+      options: { id: string; name: string; priceDelta: string; isActive?: boolean }[];
+    };
+  }[];
 };
 
 type Category = {
@@ -72,6 +86,18 @@ type OpenOrderStatusFilter = "all" | "draft" | "sent_to_kitchen";
 
 const OPEN_ORDER_STALE_HOURS = 4;
 
+function canWaiterVoidLine(inKitchen: boolean, kitchenStatus?: string | null) {
+  if (!inKitchen) return true;
+  return kitchenStatus === "new" || kitchenStatus === null;
+}
+
+function lineKitchenStatusLabel(kitchenStatus?: string | null) {
+  if (kitchenStatus === "preparing") return "Preparando en cocina";
+  if (kitchenStatus === "ready") return "Listo en cocina";
+  if (kitchenStatus === "new") return "Enviado a cocina";
+  return null;
+}
+
 export default function CounterSale({ branchId, branchType }: { branchId: string; branchType: string }) {
   const { productCardBg } = useTheme();
   const [categories, setCategories] = useState<Category[]>([]);
@@ -107,6 +133,17 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   const [openOrdersStatusFilter, setOpenOrdersStatusFilter] = useState<OpenOrderStatusFilter>("all");
   const [voidingOrderId, setVoidingOrderId] = useState<string | null>(null);
   const [voidingStale, setVoidingStale] = useState(false);
+  const [modifierProduct, setModifierProduct] = useState<Product | null>(null);
+  const [showDiscount, setShowDiscount] = useState(false);
+  const [applyingCourtesyId, setApplyingCourtesyId] = useState<string | null>(null);
+  const [maxDiscountWithoutPin, setMaxDiscountWithoutPin] = useState(10);
+  const [pinPrompt, setPinPrompt] = useState<{
+    title: string;
+    description: string;
+    onSubmit: (pin: string) => Promise<void>;
+  } | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
   const invoiceRef = useRef<any>(null);
   invoiceRef.current = invoice;
 
@@ -191,6 +228,13 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   useEffect(() => { startSale(saleMode); }, [branchId, saleMode]);
 
   useEffect(() => {
+    api.get("/v1/settings/branch").then((res) => {
+      const max = Number(res.data?.pos?.maxDiscountPercentWithoutPin);
+      setMaxDiscountWithoutPin(Number.isFinite(max) && max >= 0 && max <= 100 ? max : 10);
+    }).catch(() => {});
+  }, [branchId]);
+
+  useEffect(() => {
     refreshPickupQueue();
     refreshDeliveryQueue();
     refreshOpenOrders();
@@ -213,6 +257,59 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     setDeliveryReference(invoice.deliveryReference ?? "");
     setDeliveryFee(String(invoice.deliveryFee ?? "0"));
   }, [invoice?.id]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<LineVoidedDetail>).detail;
+      if (!detail?.invoiceId) return;
+      void refreshOpenOrders();
+      if (invoice?.id !== detail.invoiceId) return;
+      void api.get(`/v1/pos/invoices/${detail.invoiceId}`).then((res) => {
+        setInvoice(res.data);
+      }).catch(() => {});
+    };
+    window.addEventListener(LINE_VOIDED_EVENT, handler);
+    return () => window.removeEventListener(LINE_VOIDED_EVENT, handler);
+  }, [invoice?.id]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<InvoiceUpdatedDetail>).detail;
+      if (!detail?.invoiceId) return;
+      void refreshOpenOrders();
+      if (invoice?.id !== detail.invoiceId) return;
+      void api.get(`/v1/pos/invoices/${detail.invoiceId}`).then((res) => {
+        setInvoice(res.data);
+      }).catch(() => {});
+    };
+    window.addEventListener(INVOICE_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(INVOICE_UPDATED_EVENT, handler);
+  }, [invoice?.id]);
+
+  function requestDiscountPin(title: string, description: string, action: (pin: string) => Promise<void>) {
+    setPinError(null);
+    setPinPrompt({
+      title,
+      description,
+      onSubmit: async (pin) => {
+        setPinBusy(true);
+        setPinError(null);
+        try {
+          await action(pin);
+          setPinPrompt(null);
+        } catch (err: unknown) {
+          if (isDiscountPinRequiredError(err) || (err as { response?: { status?: number } })?.response?.status === 401) {
+            setPinError(discountPinErrorMessage(err, "PIN incorrecto"));
+          } else {
+            setPinPrompt(null);
+            alert(discountPinErrorMessage(err, "No se pudo aplicar"));
+          }
+        } finally {
+          setPinBusy(false);
+        }
+      },
+    });
+  }
 
   const filtered = useMemo(() => {
     let list = products;
@@ -267,7 +364,13 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     [visibleOpenOrders],
   );
 
-  async function addVariant(variant: Product["variants"][0], productName: string, sellByWeight?: boolean) {
+  async function addVariant(
+    variant: Product["variants"][0],
+    productName: string,
+    sellByWeight?: boolean,
+    modifiers?: Array<{ name: string; priceDelta?: string }>,
+    lineNotes?: string,
+  ) {
     const inv = invoiceRef.current;
     if (!inv) return;
     const qty = sellByWeight ? weight : "1";
@@ -277,6 +380,8 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       qty,
       unitPrice: String(variant.price),
       weight: sellByWeight ? weight : undefined,
+      modifiers: modifiers?.length ? modifiers : undefined,
+      lineNotes,
     });
     const updated = await api.get(`/v1/pos/invoices/${inv.id}`);
     setInvoice(updated.data);
@@ -301,6 +406,11 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   async function addProduct(product: Product) {
     const variant = product.variants[0];
     if (!variant) return;
+    const groups = (product.modifierGroups ?? []).map((row) => row.modifierGroup).filter((g) => (g.options ?? []).length > 0);
+    if (groups.length > 0) {
+      setModifierProduct(product);
+      return;
+    }
     await addVariant(variant, product.name, variant.sellByWeight);
   }
 
@@ -364,11 +474,20 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     }
   }
 
-  async function removeLine(lineId: string) {
+  async function removeLine(lineId: string, lineName?: string) {
     if (!invoice) return;
+    if (inKitchen) {
+      const ok = window.confirm(
+        `¿Anular "${lineName ?? "este producto"}" en cocina?\nSe quitará del pedido y se avisará al KDS.`,
+      );
+      if (!ok) return;
+    }
     setRemovingLineId(lineId);
     try {
       const updated = await api.post(`/v1/pos/invoices/${invoice.id}/lines/${lineId}/remove`);
+      if (updated.data.kitchenLineVoidEscpos?.base64) {
+        await printKitchenLineVoidEscpos(updated.data.kitchenLineVoidEscpos);
+      }
       setInvoice(updated.data);
     } catch (err: any) {
       alert(err.response?.data?.message ?? "No se pudo quitar el producto");
@@ -484,6 +603,66 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     }
   }
 
+  async function applyInvoiceDiscount(
+    data: { kind: "percent" | "amount"; value: string; reason?: string },
+    approvalPin?: string,
+  ): Promise<boolean | void> {
+    if (!invoice) return;
+    const baseTotal = invoice.lines?.reduce((sum: number, line: any) => sum + Number(line.lineTotal), 0) ?? 0;
+    const pct = data.kind === "percent"
+      ? Number(data.value)
+      : discountPercentFromAmount(Number(data.value), baseTotal);
+    if (!approvalPin && needsDiscountPin(pct, maxDiscountWithoutPin)) {
+      requestDiscountPin(
+        "Autorizar descuento",
+        `El descuento supera el ${maxDiscountWithoutPin}% permitido sin autorización. Ingresa PIN de gerente o administrador.`,
+        async (pin) => {
+          await applyInvoiceDiscount(data, pin);
+          setShowDiscount(false);
+        },
+      );
+      return false;
+    }
+    const res = await api.patch(`/v1/pos/invoices/${invoice.id}/discount`, {
+      kind: data.kind,
+      value: data.value,
+      reason: data.reason,
+      approvalPin,
+    });
+    setInvoice(res.data);
+  }
+
+  async function clearInvoiceDiscount() {
+    if (!invoice) return;
+    const res = await api.patch(`/v1/pos/invoices/${invoice.id}/discount`, { kind: "clear" });
+    setInvoice(res.data);
+  }
+
+  async function toggleLineCourtesy(line: any, approvalPin?: string) {
+    if (!invoice) return;
+    const isCourtesy = Number(line.lineTotal) === 0 && Number(line.lineDiscount) > 0;
+    if (!isCourtesy && !approvalPin && needsDiscountPin(100, maxDiscountWithoutPin)) {
+      requestDiscountPin(
+        "Autorizar cortesía",
+        "El producto quedará sin costo. Ingresa PIN de gerente o administrador.",
+        (pin) => toggleLineCourtesy(line, pin),
+      );
+      return;
+    }
+    setApplyingCourtesyId(line.id);
+    try {
+      const res = await api.patch(`/v1/pos/invoices/${invoice.id}/lines/${line.id}/discount`, {
+        kind: isCourtesy ? "clear" : "courtesy",
+        approvalPin,
+      });
+      setInvoice(res.data);
+    } catch (err: unknown) {
+      alert(discountPinErrorMessage(err, "No se pudo aplicar la cortesía"));
+    } finally {
+      setApplyingCourtesyId(null);
+    }
+  }
+
   async function handlePay(data: { payments: any[]; tipAmount: string }) {
     if (!invoice) return;
     if (saleMode === "delivery") {
@@ -508,11 +687,36 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   const pendingOrders = pickupQueue.filter((o) => o.kitchenStatus !== "ready");
   const activeDeliveries = deliveryQueue.filter((o) => o.deliveryStatus !== "delivered");
   const baseTotal = Number(invoice?.total ?? 0);
+  const linesTotal = invoice?.lines?.reduce((sum: number, line: any) => sum + Number(line.lineTotal), 0) ?? 0;
+  const invoiceDiscount = Number(invoice?.discount ?? 0);
   const deliveryFeeNum = saleMode === "delivery" ? Number(deliveryFee || 0) : 0;
   const chargeTotal = baseTotal + deliveryFeeNum;
 
   return (
     <div>
+      {pinPrompt && (
+        <PinPromptModal
+          open
+          title={pinPrompt.title}
+          description={pinPrompt.description}
+          confirmLabel="Autorizar"
+          onCancel={() => {
+            if (!pinBusy) setPinPrompt(null);
+          }}
+          onSubmit={pinPrompt.onSubmit}
+          error={pinError}
+          busy={pinBusy}
+        />
+      )}
+      {showDiscount && invoice && (
+        <InvoiceDiscountModal
+          baseTotal={linesTotal}
+          currentDiscount={invoiceDiscount}
+          onApply={applyInvoiceDiscount}
+          onClear={clearInvoiceDiscount}
+          onClose={() => setShowDiscount(false)}
+        />
+      )}
       {visibleOpenOrders.length > 0 && (
         <div style={{
           marginBottom: 16, padding: 14, borderRadius: 12,
@@ -799,6 +1003,12 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       {showPay && invoice?.lines?.length > 0 && (
         <PaymentModal
           total={chargeTotal}
+          linesTotal={linesTotal}
+          invoiceDiscount={invoiceDiscount}
+          onOpenDiscount={() => {
+            setShowPay(false);
+            setShowDiscount(true);
+          }}
           onConfirm={handlePay}
           onClose={() => setShowPay(false)}
         />
@@ -894,11 +1104,21 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
             </div>
           )}
           {invoice?.lines?.map((l: any) => (
-            <div key={l.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto auto", gap: 8, alignItems: "center", fontSize: 14, marginBottom: 6, color: "var(--t-fg)" }}>
+            <div key={l.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto auto auto", gap: 8, alignItems: "center", fontSize: 14, marginBottom: 6, color: "var(--t-fg)" }}>
               <div>
                 <div>{l.nameSnapshot}</div>
+                {Array.isArray(l.modifiers) && l.modifiers.length > 0 && (
+                  <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 2 }}>
+                    {l.modifiers.map((m: any) => m.nameSnapshot).join(" · ")}
+                  </div>
+                )}
                 {l.lineNotes && (
                   <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>📝 {l.lineNotes}</div>
+                )}
+                {inKitchen && lineKitchenStatusLabel(l.kitchenStatus) && (
+                  <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>
+                    {lineKitchenStatusLabel(l.kitchenStatus)}
+                  </div>
                 )}
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -920,6 +1140,24 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
               </div>
               <span>{formatCOP(Number(l.lineTotal))}</span>
               <button
+                type="button"
+                onClick={() => toggleLineCourtesy(l)}
+                disabled={applyingCourtesyId === l.id}
+                title={Number(l.lineTotal) === 0 && Number(l.lineDiscount) > 0 ? "Quitar cortesía" : "Cortesía"}
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: 6,
+                  border: Number(l.lineDiscount) > 0 ? "1px solid #fcd34d" : "1px solid var(--t-border)",
+                  background: Number(l.lineDiscount) > 0 ? "#fef3c7" : "var(--t-card)",
+                  color: Number(l.lineDiscount) > 0 ? "#b45309" : "var(--t-muted)",
+                  cursor: applyingCourtesyId === l.id ? "wait" : "pointer",
+                  fontSize: 12,
+                  opacity: applyingCourtesyId === l.id ? 0.6 : 1,
+                }}
+              >
+                {applyingCourtesyId === l.id ? "..." : "🎁"}
+              </button>
+              <button
                 onClick={() => editLineNote(l.id, l.lineNotes)}
                 disabled={updatingNoteId === l.id || inKitchen}
                 title={inKitchen ? "No se puede editar despues de enviar a cocina" : "Editar nota"}
@@ -937,25 +1175,43 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
                 {updatingNoteId === l.id ? "..." : "Nota"}
               </button>
               <button
-                onClick={() => removeLine(l.id)}
-                disabled={removingLineId === l.id || inKitchen}
-                title={inKitchen ? "No se puede quitar despues de enviar a cocina" : "Quitar producto"}
+                onClick={() => removeLine(l.id, l.nameSnapshot)}
+                disabled={removingLineId === l.id || !canWaiterVoidLine(inKitchen, l.kitchenStatus)}
+                title={
+                  inKitchen && !canWaiterVoidLine(inKitchen, l.kitchenStatus)
+                    ? "Ya está en preparación. Pide a cocina que lo anule."
+                    : inKitchen
+                      ? "Anular en cocina"
+                      : "Quitar producto"
+                }
                 style={{
                   padding: "4px 8px",
                   borderRadius: 6,
                   border: "1px solid var(--t-danger-border)",
                   background: "var(--t-danger-soft)",
                   color: "#f87171",
-                  cursor: inKitchen ? "not-allowed" : "pointer",
+                  cursor: removingLineId === l.id || !canWaiterVoidLine(inKitchen, l.kitchenStatus) ? "not-allowed" : "pointer",
                   fontSize: 12,
-                  opacity: removingLineId === l.id || inKitchen ? 0.6 : 1,
+                  opacity: removingLineId === l.id || !canWaiterVoidLine(inKitchen, l.kitchenStatus) ? 0.6 : 1,
                 }}
               >
-                {removingLineId === l.id ? "..." : "Quitar"}
+                {removingLineId === l.id ? "..." : (inKitchen ? "Anular" : "Quitar")}
               </button>
             </div>
           ))}
           <hr />
+          {invoiceDiscount > 0 && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "var(--t-muted)", marginBottom: 4 }}>
+                <span>Subtotal</span>
+                <span>{formatCOP(linesTotal)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#b91c1c", marginBottom: 8 }}>
+                <span>Descuento</span>
+                <span>-{formatCOP(invoiceDiscount)}</span>
+              </div>
+            </>
+          )}
           {saleMode === "delivery" ? (
             <div style={{ display: "grid", gap: 6 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14 }}>
@@ -1080,6 +1336,20 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
             </button>
           )}
 
+          {invoice?.lines?.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowDiscount(true)}
+              style={{
+                width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 10,
+                border: "1px solid var(--t-border-strong)", background: "var(--t-card)", color: "var(--t-fg)",
+                fontWeight: 600, fontSize: 14, cursor: "pointer",
+              }}
+            >
+              {invoiceDiscount > 0 ? "✏️ Editar descuento de cuenta" : "🏷️ Descuento en la cuenta"}
+            </button>
+          )}
+
           <button
             onClick={() => setShowPay(true)}
             disabled={!invoice?.lines?.length}
@@ -1095,6 +1365,20 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
         </div>
         </div>
       </div>
+      {modifierProduct && (
+        <ModifierPickerModal
+          productName={modifierProduct.name}
+          groups={(modifierProduct.modifierGroups ?? []).map((row) => row.modifierGroup)}
+          onClose={() => setModifierProduct(null)}
+          onConfirm={async ({ modifiers, lineNotes }) => {
+            const current = modifierProduct;
+            const variant = current.variants[0];
+            setModifierProduct(null);
+            if (!variant) return;
+            await addVariant(variant, current.name, variant.sellByWeight, modifiers, lineNotes);
+          }}
+        />
+      )}
     </div>
   );
 }

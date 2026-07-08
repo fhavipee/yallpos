@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, clearBranchId, setAuthToken, setBranchId } from "../lib/api";
-import { createBranchSocket, dispatchTableUpdated, dispatchTableReady, dispatchTableServed, type TableUpdatedDetail, type TableReadyDetail, type TableServedDetail } from "../lib/kdsSocket";
+import { createBranchSocket, dispatchTableUpdated, dispatchTableReady, dispatchTableServed, dispatchLineVoided, dispatchInvoiceUpdated, type TableUpdatedDetail, type TableReadyDetail, type TableServedDetail, type LineVoidedDetail, type InvoiceUpdatedDetail } from "../lib/kdsSocket";
 import { clearAuth, getStoredAuth, refreshStoredUser, saveAuth, type AuthUser } from "../lib/auth";
 import Login from "./Login";
 import Tables from "./Tables";
@@ -43,6 +43,7 @@ export default function App() {
   const [tableSessionId, setTableSessionId] = useState(localStorage.getItem("tableSessionId") || "");
   const [tab, setTab] = useState<Tab>("counter");
   const [moreOpen, setMoreOpen] = useState(false);
+  const [companyBrand, setCompanyBrand] = useState("");
   const { dark, toggleDark } = useTheme();
   const isTablet = useIsTablet();
   const standaloneView = new URLSearchParams(window.location.search).get("view");
@@ -100,11 +101,13 @@ export default function App() {
 
   useEffect(() => {
     api.get("/v1/pilot/config").then((r) => {
-      if (r.data?.company?.razonSocial) {
-        document.title = `YallPos — ${r.data.company.razonSocial}`;
+      const name = r.data?.company?.razonSocial?.trim();
+      if (name) {
+        setCompanyBrand(name);
+        document.title = `YallPos — ${name}`;
       }
     }).catch(() => {});
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (!branchId || !branchReady) return;
@@ -118,13 +121,19 @@ export default function App() {
     const onTableUpdated = (payload: TableUpdatedDetail) => dispatchTableUpdated(payload);
     const onTableReady = (payload: TableReadyDetail) => dispatchTableReady(payload);
     const onTableServed = (payload: TableServedDetail) => dispatchTableServed(payload);
+    const onLineVoided = (payload: LineVoidedDetail) => dispatchLineVoided(payload);
+    const onInvoiceUpdated = (payload: InvoiceUpdatedDetail) => dispatchInvoiceUpdated(payload);
     socket.on("pos.table.updated", onTableUpdated);
     socket.on("kds.table.ready", onTableReady);
     socket.on("kds.table.served", onTableServed);
+    socket.on("kds.line.voided", onLineVoided);
+    socket.on("pos.invoice.updated", onInvoiceUpdated);
     return () => {
       socket.off("pos.table.updated", onTableUpdated);
       socket.off("kds.table.ready", onTableReady);
       socket.off("kds.table.served", onTableServed);
+      socket.off("kds.line.voided", onLineVoided);
+      socket.off("pos.invoice.updated", onInvoiceUpdated);
       socket.disconnect();
     };
   }, [branchId]);
@@ -201,6 +210,7 @@ export default function App() {
       <WaiterKioskShell
         branchId={branchId}
         branchName={currentBranch?.name}
+        companyBrand={companyBrand}
         user={user}
         onLogout={logout}
       />
@@ -224,7 +234,10 @@ export default function App() {
     <div className={`yall-app-shell${isTablet ? " yall-app-shell--mobile-nav" : ""}`} style={{ fontFamily: "'Inter', system-ui, sans-serif", background: bg, color: fg, minHeight: "100vh" }}>
       <header className={`yall-app-header${isTablet ? " yall-app-header--compact" : ""}`}>
         <div className="yall-app-header-start">
-          <div className="yall-app-brand">YallPos</div>
+          <div className="yall-app-brand">
+            <span className="yall-app-brand__name">{companyBrand || "YallPos"}</span>
+            {companyBrand && <span className="yall-app-brand__tag">YallPos</span>}
+          </div>
           {isTablet && (
             <span className="yall-app-mobile-tab" aria-current="page">
               {APP_TAB_LABELS[tab]}

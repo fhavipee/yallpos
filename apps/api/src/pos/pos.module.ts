@@ -7,8 +7,10 @@ import { NotificationsModule } from "../notifications/notifications.module";
 import { TaxModule } from "../tax/tax.module";
 import { PrismaModule } from "../prisma/prisma.module";
 
+import { PrintModule } from "../print/print.module";
+
 @Module({
-  imports: [PrismaModule, KdsModule, FiscalModule, NotificationsModule, TaxModule],
+  imports: [PrismaModule, KdsModule, FiscalModule, NotificationsModule, TaxModule, PrintModule],
   controllers: [PosController],
   providers: [PosService],
   exports: [PosService],

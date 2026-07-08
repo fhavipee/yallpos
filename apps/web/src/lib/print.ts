@@ -173,6 +173,14 @@ export async function printKitchenVoidTicket(invoiceId: string) {
   return { ok: methods.length > 0, methods };
 }
 
+export async function printKitchenLineVoidEscpos(payload: { base64: string }) {
+  const config = loadPrinterConfig();
+  if (await sendToPrintAgent(payload.base64, "kitchen", config)) {
+    return { ok: true, methods: ["escpos-cocina-anulado"] };
+  }
+  return { ok: false, methods: [] as string[] };
+}
+
 async function openHtmlSeatingSlip(sessionId: string, reservationId?: string) {
   const params = reservationId ? `?reservationId=${encodeURIComponent(reservationId)}` : "";
   const htmlUrl = `${api.defaults.baseURL}/v1/print/table-sessions/${sessionId}/seating.html${params}`;

@@ -5,12 +5,14 @@ import { formatPickupDisplay, formatPickupLabel, isAutoOrderCode, isPhysicalLoca
 
 type KdsItem = {
   id: string;
+  invoiceLineId: string;
   status: string;
   ticketId: string;
   invoiceId: string;
   productName: string;
   qty: number;
   lineNotes?: string;
+  modifiers?: string[];
   tableName?: string | null;
   areaName?: string | null;
   serviceType?: string | null;
@@ -43,8 +45,9 @@ export default function Kds({ branchId }: { branchId: string }) {
   const [stationId, setStationId] = useState("");
   const [items, setItems] = useState<KdsItem[]>([]);
   const [clock, setClock] = useState(new Date());
-  const [voidAlert, setVoidAlert] = useState<{ label: string; reason?: string | null } | null>(null);
+  const [voidAlert, setVoidAlert] = useState<{ label: string; reason?: string | null; productName?: string } | null>(null);
   const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
+  const [busyLineId, setBusyLineId] = useState<string | null>(null);
 
   useEffect(() => {
     setBranchId(branchId);
@@ -76,8 +79,31 @@ export default function Kds({ branchId }: { branchId: string }) {
       window.setTimeout(() => setVoidAlert(null), 10000);
       load();
     });
+    socket.on("kds.line.voided", (payload: { label?: string; productName?: string; qty?: number }) => {
+      const qty = payload.qty ? `${payload.qty}× ` : "";
+      setVoidAlert({
+        label: payload.label ?? "Pedido",
+        productName: `${qty}${payload.productName ?? "Producto"}`,
+      });
+      window.setTimeout(() => setVoidAlert(null), 10000);
+      load();
+    });
     return () => { socket.disconnect(); };
   }, [branchId, stationId]);
+
+  async function voidLineFromKitchen(item: KdsItem) {
+    const label = item.qty > 1 ? `${item.qty}× ${item.productName}` : item.productName;
+    if (!window.confirm(`¿Anular "${label}" de la comanda?`)) return;
+    setBusyLineId(item.invoiceLineId);
+    try {
+      await api.post(`/v1/pos/invoices/${item.invoiceId}/lines/${item.invoiceLineId}/void-from-kitchen`);
+      await load();
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "No se pudo anular el producto");
+    } finally {
+      setBusyLineId(null);
+    }
+  }
 
   async function setStatus(itemId: string, status: string) {
     const res = await api.post(`/v1/kds/items/${itemId}/status/${status}`);
@@ -157,7 +183,8 @@ export default function Kds({ branchId }: { branchId: string }) {
           color: "#fff",
           fontWeight: 700,
         }}>
-          ⛔ PEDIDO ANULADO — {voidAlert.label}
+          ⛔ {voidAlert.productName ? "PRODUCTO ANULADO" : "PEDIDO ANULADO"} — {voidAlert.label}
+          {voidAlert.productName ? ` · ${voidAlert.productName}` : ""}
           {voidAlert.reason ? ` · ${voidAlert.reason}` : ""}
         </div>
       )}
@@ -202,8 +229,10 @@ export default function Kds({ branchId }: { branchId: string }) {
                   group={group}
                   column={col}
                   busy={busyOrderId === group.invoiceId}
+                  busyLineId={busyLineId}
                   onOrderStatus={setOrderStatus}
                   onNotify={notifyCustomer}
+                  onVoidLine={voidLineFromKitchen}
                 />
               ))}
               {grouped[col].length === 0 && (
@@ -270,14 +299,18 @@ function KdsOrderCard({
   group,
   column,
   busy,
+  busyLineId,
   onOrderStatus,
   onNotify,
+  onVoidLine,
 }: {
   group: OrderGroup;
   column: "new" | "preparing" | "ready";
   busy: boolean;
+  busyLineId: string | null;
   onOrderStatus: (group: OrderGroup, status: string) => void;
   onNotify: (invoiceId: string) => void;
+  onVoidLine: (item: KdsItem) => void;
 }) {
   const urgent = group.elapsedMin >= 15;
   const warning = group.elapsedMin >= 8;
@@ -334,11 +367,39 @@ function KdsOrderCard({
               border: "1px solid #334155",
             }}
           >
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>
-              {item.qty > 1 ? `${item.qty}× ` : ""}{item.productName}
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>
+                  {item.qty > 1 ? `${item.qty}× ` : ""}{item.productName}
+                </div>
+                {Array.isArray(item.modifiers) && item.modifiers.length > 0 && (
+                  <div style={{ fontSize: 12, color: "#cbd5e1", marginTop: 4 }}>
+                    + {item.modifiers.join(" · ")}
+                  </div>
+                )}
+                {item.lineNotes && <div style={{ fontSize: 12, color: "#fbbf24", marginTop: 4 }}>📝 {item.lineNotes}</div>}
+                {item.course && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>{item.course}</div>}
+              </div>
+              <button
+                type="button"
+                onClick={() => onVoidLine(item)}
+                disabled={busyLineId === item.invoiceLineId}
+                style={{
+                  flexShrink: 0,
+                  padding: "4px 8px",
+                  borderRadius: 8,
+                  border: "1px solid #7f1d1d",
+                  background: "#450a0a",
+                  color: "#fca5a5",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  cursor: busyLineId === item.invoiceLineId ? "wait" : "pointer",
+                  opacity: busyLineId === item.invoiceLineId ? 0.6 : 1,
+                }}
+              >
+                {busyLineId === item.invoiceLineId ? "…" : "Anular"}
+              </button>
             </div>
-            {item.lineNotes && <div style={{ fontSize: 12, color: "#fbbf24", marginTop: 4 }}>📝 {item.lineNotes}</div>}
-            {item.course && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>{item.course}</div>}
           </div>
         ))}
       </div>

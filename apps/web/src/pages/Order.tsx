@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { api, formatApiError, setBranchId, formatCOP } from "../lib/api";
 import { canVoidInvoice, getStoredAuth } from "../lib/auth";
-import { printInvoiceReceipt, printKitchenTicket, printKitchenVoidTicket } from "../lib/print";
-import { dispatchTableUpdated, TABLE_READY_EVENT, TABLE_SERVED_EVENT, type TableReadyDetail, type TableServedDetail } from "../lib/kdsSocket";
+import { printInvoiceReceipt, printKitchenTicket, printKitchenLineVoidEscpos, printKitchenVoidTicket } from "../lib/print";
+import { dispatchTableUpdated, TABLE_READY_EVENT, TABLE_SERVED_EVENT, LINE_VOIDED_EVENT, INVOICE_UPDATED_EVENT, type TableReadyDetail, type TableServedDetail, type LineVoidedDetail, type InvoiceUpdatedDetail } from "../lib/kdsSocket";
+import { discountPercentFromAmount, discountPinErrorMessage, isDiscountPinRequiredError, needsDiscountPin } from "../lib/discountPin";
+import PinPromptModal from "../components/PinPromptModal";
 import { matchesOrderWaiter, orderReadyActionLabel, playKitchenReadyTone } from "../lib/kitchenReady";
 import CategoryPicker from "../components/CategoryPicker";
+import ModifierPickerModal from "../components/ModifierPickerModal";
 import PaymentModal from "../components/PaymentModal";
+import InvoiceDiscountModal from "../components/InvoiceDiscountModal";
 import { useBarcodeScanner } from "../lib/barcode";
 import { useTheme } from "../lib/theme";
+import { useIsMobile } from "../lib/useMediaQuery";
 import type { WaiterIdentity } from "../lib/pin";
 import { assignTableWaiter } from "../lib/waiterAttribution";
 
@@ -18,6 +23,15 @@ type Product = {
   course?: string;
   category?: { id: string; name: string; color?: string };
   variants: { id: string; name: string; price: string }[];
+  modifierGroups?: {
+    modifierGroup: {
+      id: string;
+      name: string;
+      minSelect: number;
+      maxSelect: number;
+      options: { id: string; name: string; priceDelta: string; isActive?: boolean }[];
+    };
+  }[];
 };
 
 type Category = {
@@ -28,6 +42,18 @@ type Category = {
   imageUrl?: string | null;
   mobileDisplay?: "image" | "description" | string | null;
 };
+
+function canWaiterVoidLine(inKitchen: boolean, kitchenStatus?: string | null) {
+  if (!inKitchen) return true;
+  return kitchenStatus === "new" || kitchenStatus === null;
+}
+
+function lineKitchenStatusLabel(kitchenStatus?: string | null) {
+  if (kitchenStatus === "preparing") return "Preparando en cocina";
+  if (kitchenStatus === "ready") return "Listo en cocina";
+  if (kitchenStatus === "new") return "Enviado a cocina";
+  return null;
+}
 
 export default function Order({
   branchId,
@@ -62,12 +88,32 @@ export default function Order({
   const [kitchenReadyAlert, setKitchenReadyAlert] = useState<TableReadyDetail | null>(null);
   const [reprintingKitchen, setReprintingKitchen] = useState(false);
   const [markingServed, setMarkingServed] = useState(false);
+  const [modifierProduct, setModifierProduct] = useState<Product | null>(null);
+  const [showMobileActions, setShowMobileActions] = useState(false);
+  const [showDiscount, setShowDiscount] = useState(false);
+  const [applyingCourtesyId, setApplyingCourtesyId] = useState<string | null>(null);
+  const [maxDiscountWithoutPin, setMaxDiscountWithoutPin] = useState(10);
+  const [pinPrompt, setPinPrompt] = useState<{
+    title: string;
+    description: string;
+    onSubmit: (pin: string) => Promise<void>;
+  } | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinBusy, setPinBusy] = useState(false);
   const canVoid = canVoidInvoice(getStoredAuth()?.user);
+  const isMobile = useIsMobile();
 
   useEffect(() => { setBranchId(branchId); }, [branchId]);
 
   useEffect(() => {
     api.get("/v1/restaurant/waiters").then((res) => setWaiters(res.data));
+  }, [branchId]);
+
+  useEffect(() => {
+    api.get("/v1/settings/branch").then((res) => {
+      const max = Number(res.data?.pos?.maxDiscountPercentWithoutPin);
+      setMaxDiscountWithoutPin(Number.isFinite(max) && max >= 0 && max <= 100 ? max : 10);
+    }).catch(() => {});
   }, [branchId]);
 
   useEffect(() => {
@@ -206,6 +252,59 @@ export default function Order({
     return () => window.removeEventListener(TABLE_SERVED_EVENT, handler);
   }, [tableSessionId, openInvoices, invoice?.id]);
 
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<LineVoidedDetail>).detail;
+      if (!detail?.invoiceId) return;
+      const matchesSession = detail.tableSessionId && detail.tableSessionId === tableSessionId;
+      const matchesInvoice = detail.invoiceId === invoice?.id || openInvoices.some((i) => i.id === detail.invoiceId);
+      if (matchesSession || matchesInvoice) {
+        void loadOrCreate();
+      }
+    };
+    window.addEventListener(LINE_VOIDED_EVENT, handler);
+    return () => window.removeEventListener(LINE_VOIDED_EVENT, handler);
+  }, [tableSessionId, openInvoices, invoice?.id]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<InvoiceUpdatedDetail>).detail;
+      if (!detail?.invoiceId) return;
+      const matchesSession = detail.tableSessionId && detail.tableSessionId === tableSessionId;
+      const matchesInvoice = detail.invoiceId === invoice?.id || openInvoices.some((i) => i.id === detail.invoiceId);
+      if (matchesSession || matchesInvoice) {
+        void loadOrCreate();
+      }
+    };
+    window.addEventListener(INVOICE_UPDATED_EVENT, handler);
+    return () => window.removeEventListener(INVOICE_UPDATED_EVENT, handler);
+  }, [tableSessionId, openInvoices, invoice?.id]);
+
+  function requestDiscountPin(title: string, description: string, action: (pin: string) => Promise<void>) {
+    setPinError(null);
+    setPinPrompt({
+      title,
+      description,
+      onSubmit: async (pin) => {
+        setPinBusy(true);
+        setPinError(null);
+        try {
+          await action(pin);
+          setPinPrompt(null);
+        } catch (err: unknown) {
+          if (isDiscountPinRequiredError(err) || (err as { response?: { status?: number } })?.response?.status === 401) {
+            setPinError(discountPinErrorMessage(err, "PIN incorrecto"));
+          } else {
+            setPinPrompt(null);
+            alert(discountPinErrorMessage(err, "No se pudo aplicar"));
+          }
+        } finally {
+          setPinBusy(false);
+        }
+      },
+    });
+  }
+
   async function selectInvoice(invoiceId: string) {
     setActiveInvoiceId(invoiceId);
     const res = await api.get(`/v1/pos/invoices/by-table-session/${tableSessionId}`, {
@@ -249,7 +348,22 @@ export default function Order({
     if (!invoice || invoice.status === "paid") return;
     const variant = product.variants[0];
     if (!variant) return;
-    const notes = window.prompt(`Notas para ${product.name} (opcional):`, "") ?? "";
+    const groups = (product.modifierGroups ?? []).map((row) => row.modifierGroup).filter((g) => (g.options ?? []).length > 0);
+    if (groups.length > 0) {
+      setModifierProduct(product);
+      return;
+    }
+    await addProductWithModifiers(product, [], undefined);
+  }
+
+  async function addProductWithModifiers(
+    product: Product,
+    modifiers: Array<{ name: string; priceDelta?: string }>,
+    lineNotes?: string,
+  ) {
+    if (!invoice || invoice.status === "paid") return;
+    const variant = product.variants[0];
+    if (!variant) return;
     try {
       await api.post(`/v1/pos/invoices/${invoice.id}/add-line`, {
         variantId: variant.id,
@@ -257,7 +371,8 @@ export default function Order({
         course: product.course,
         qty: "1",
         unitPrice: String(variant.price),
-        lineNotes: notes.trim() || undefined,
+        lineNotes,
+        modifiers: modifiers.length ? modifiers : undefined,
       });
       await loadOrCreate();
     } catch (err: any) {
@@ -362,10 +477,19 @@ export default function Order({
     }
   }
 
-  async function removeLine(lineId: string) {
+  async function removeLine(lineId: string, lineName?: string) {
     if (!invoice) return;
+    if (inKitchen) {
+      const ok = window.confirm(
+        `¿Anular "${lineName ?? "este producto"}" en cocina?\nSe quitará de la comanda y se avisará al KDS.`,
+      );
+      if (!ok) return;
+    }
     try {
-      await api.post(`/v1/pos/invoices/${invoice.id}/lines/${lineId}/remove`);
+      const res = await api.post(`/v1/pos/invoices/${invoice.id}/lines/${lineId}/remove`);
+      if (res.data.kitchenLineVoidEscpos?.base64) {
+        await printKitchenLineVoidEscpos(res.data.kitchenLineVoidEscpos);
+      }
       await loadOrCreate();
     } catch (err: any) {
       alert(err.response?.data?.message ?? "No se pudo quitar el ítem");
@@ -424,6 +548,66 @@ export default function Order({
     }
   }
 
+  async function applyInvoiceDiscount(
+    data: { kind: "percent" | "amount"; value: string; reason?: string },
+    approvalPin?: string,
+  ): Promise<boolean | void> {
+    if (!invoice) return;
+    const baseTotal = invoice.lines?.reduce((sum: number, line: any) => sum + Number(line.lineTotal), 0) ?? 0;
+    const pct = data.kind === "percent"
+      ? Number(data.value)
+      : discountPercentFromAmount(Number(data.value), baseTotal);
+    if (!approvalPin && needsDiscountPin(pct, maxDiscountWithoutPin)) {
+      requestDiscountPin(
+        "Autorizar descuento",
+        `El descuento supera el ${maxDiscountWithoutPin}% permitido sin autorización. Ingresa PIN de gerente o administrador.`,
+        async (pin) => {
+          await applyInvoiceDiscount(data, pin);
+          setShowDiscount(false);
+        },
+      );
+      return false;
+    }
+    await api.patch(`/v1/pos/invoices/${invoice.id}/discount`, {
+      kind: data.kind,
+      value: data.value,
+      reason: data.reason,
+      approvalPin,
+    });
+    await loadOrCreate();
+  }
+
+  async function clearInvoiceDiscount() {
+    if (!invoice) return;
+    await api.patch(`/v1/pos/invoices/${invoice.id}/discount`, { kind: "clear" });
+    await loadOrCreate();
+  }
+
+  async function toggleLineCourtesy(line: any, approvalPin?: string) {
+    if (!invoice || invoice.status === "paid") return;
+    const isCourtesy = Number(line.lineTotal) === 0 && Number(line.lineDiscount) > 0;
+    if (!isCourtesy && !approvalPin && needsDiscountPin(100, maxDiscountWithoutPin)) {
+      requestDiscountPin(
+        "Autorizar cortesía",
+        "El producto quedará sin costo. Ingresa PIN de gerente o administrador.",
+        (pin) => toggleLineCourtesy(line, pin),
+      );
+      return;
+    }
+    setApplyingCourtesyId(line.id);
+    try {
+      await api.patch(`/v1/pos/invoices/${invoice.id}/lines/${line.id}/discount`, {
+        kind: isCourtesy ? "clear" : "courtesy",
+        approvalPin,
+      });
+      await loadOrCreate();
+    } catch (err: unknown) {
+      alert(discountPinErrorMessage(err, "No se pudo aplicar la cortesía"));
+    } finally {
+      setApplyingCourtesyId(null);
+    }
+  }
+
   async function handlePay(data: { payments: any[]; tipAmount: string }) {
     if (!invoice) return;
     const paidId = invoice.id;
@@ -445,6 +629,11 @@ export default function Order({
     }
   }
 
+  const total = Number(invoice?.total ?? 0);
+  const linesTotal = invoice?.lines?.reduce((sum: number, line: any) => sum + Number(line.lineTotal), 0) ?? 0;
+  const invoiceDiscount = Number(invoice?.discount ?? 0);
+  const inKitchen = invoice?.status === "sent_to_kitchen";
+
   if (!tableSessionId) {
     return (
       <div style={{ textAlign: "center", padding: 60, color: "var(--t-muted)" }}>
@@ -454,13 +643,43 @@ export default function Order({
     );
   }
 
-  const total = Number(invoice?.total ?? 0);
-  const inKitchen = invoice?.status === "sent_to_kitchen";
-
   return (
     <div>
+      {pinPrompt && (
+        <PinPromptModal
+          open
+          title={pinPrompt.title}
+          description={pinPrompt.description}
+          confirmLabel="Autorizar"
+          onCancel={() => {
+            if (!pinBusy) setPinPrompt(null);
+          }}
+          onSubmit={pinPrompt.onSubmit}
+          error={pinError}
+          busy={pinBusy}
+        />
+      )}
+      {showDiscount && !isPaid && invoice && (
+        <InvoiceDiscountModal
+          baseTotal={linesTotal}
+          currentDiscount={invoiceDiscount}
+          onApply={applyInvoiceDiscount}
+          onClear={clearInvoiceDiscount}
+          onClose={() => setShowDiscount(false)}
+        />
+      )}
       {showPay && !isPaid && (
-        <PaymentModal total={total} onConfirm={handlePay} onClose={() => setShowPay(false)} />
+        <PaymentModal
+          total={total}
+          linesTotal={linesTotal}
+          invoiceDiscount={invoiceDiscount}
+          onOpenDiscount={() => {
+            setShowPay(false);
+            setShowDiscount(true);
+          }}
+          onConfirm={handlePay}
+          onClose={() => setShowPay(false)}
+        />
       )}
 
       {showSplit && !isPaid && invoice?.lines?.length > 1 && (
@@ -778,82 +997,177 @@ export default function Order({
                     </button>
                   )}
                 </div>
-                {l.lineNotes && <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 2 }}>{l.lineNotes}</div>}
-              </div>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                <span>{formatCOP(Number(l.lineTotal))}</span>
-                {!isPaid && !inKitchen && (
-                  <button
-                    onClick={() => removeLine(l.id)}
-                    title="Quitar"
-                    style={{ border: "none", background: "transparent", color: "#dc2626", cursor: "pointer", fontSize: 16 }}
-                  >
-                    ×
-                  </button>
+                {Array.isArray(l.modifiers) && l.modifiers.length > 0 && (
+                  <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 2 }}>
+                    {l.modifiers.map((m: any) => m.nameSnapshot).join(" · ")}
+                  </div>
                 )}
+                {l.lineNotes && <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 2 }}>{l.lineNotes}</div>}
+                {inKitchen && lineKitchenStatusLabel(l.kitchenStatus) && (
+                  <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>
+                    {lineKitchenStatusLabel(l.kitchenStatus)}
+                  </div>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 6, flexDirection: "column" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>{formatCOP(Number(l.lineTotal))}</span>
+                  {!isPaid && (
+                    <button
+                      type="button"
+                      onClick={() => toggleLineCourtesy(l)}
+                      disabled={applyingCourtesyId === l.id}
+                      title={Number(l.lineTotal) === 0 && Number(l.lineDiscount) > 0 ? "Quitar cortesía" : "Cortesía"}
+                      style={{
+                        border: "none",
+                        background: Number(l.lineDiscount) > 0 ? "#fef3c7" : "transparent",
+                        color: Number(l.lineDiscount) > 0 ? "#b45309" : "var(--t-muted)",
+                        cursor: applyingCourtesyId === l.id ? "wait" : "pointer",
+                        fontSize: 14,
+                        borderRadius: 6,
+                        padding: "0 4px",
+                      }}
+                    >
+                      {applyingCourtesyId === l.id ? "…" : "🎁"}
+                    </button>
+                  )}
+                  {!isPaid && canWaiterVoidLine(inKitchen, l.kitchenStatus) && (
+                    <button
+                      onClick={() => removeLine(l.id, l.nameSnapshot)}
+                      title={inKitchen ? "Anular en cocina" : "Quitar"}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "#dc2626",
+                        cursor: "pointer",
+                        fontSize: inKitchen ? 11 : 16,
+                        fontWeight: inKitchen ? 600 : undefined,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {inKitchen ? "Anular" : "×"}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           ))}
           {!invoice?.lines?.length && <p style={{ color: "var(--t-muted)", fontSize: 13 }}>Sin productos</p>}
           <hr style={{ border: "none", borderTop: "1px solid var(--t-border)" }} />
+          {invoiceDiscount > 0 && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "var(--t-muted)", marginBottom: 4 }}>
+                <span>Subtotal</span>
+                <span>{formatCOP(linesTotal)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, color: "#b91c1c", marginBottom: 8 }}>
+                <span>Descuento</span>
+                <span>-{formatCOP(invoiceDiscount)}</span>
+              </div>
+            </>
+          )}
           <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 800, fontSize: 18 }}>
             <span>Total</span>
             <span>{formatCOP(total)}</span>
           </div>
 
           {!isPaid && (
-            <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
-              {invoice?.lines?.length > 1 && openInvoices.length === 1 && (
-                <button
-                  onClick={() => setShowSplit(true)}
-                  style={btnSecondary}
-                >
-                  Dividir cuenta
-                </button>
-              )}
-              <button
-                onClick={sendToKitchen}
-                disabled={!invoice?.lines?.length}
-                style={btnSecondary}
-              >
-                {inKitchen ? "Reenviar comanda cocina" : "Enviar a cocina"}
-              </button>
-              {inKitchen && (
-                <>
+            <div className={isMobile ? "yall-order-actions yall-order-actions--mobile" : "yall-order-actions"} style={{ display: "grid", gap: 8, marginTop: 16 }}>
+              {isMobile ? (
+                <div className="yall-order-actions-row">
                   <button
-                    onClick={reprintKitchen}
-                    disabled={reprintingKitchen}
-                    style={{
-                      ...btnSecondary,
-                      opacity: reprintingKitchen ? 0.7 : 1,
-                    }}
+                    type="button"
+                    className="yall-order-action-btn"
+                    onClick={() => setShowMobileActions((prev) => !prev)}
+                    style={btnSecondary}
                   >
-                    {reprintingKitchen ? "Imprimiendo…" : "Reimprimir comanda"}
+                    {showMobileActions ? "▲ Ocultar" : "⚙️ Más opciones"}
                   </button>
-                  <p style={{ margin: 0, fontSize: 11, color: "var(--t-muted)", textAlign: "center" }}>
-                    Nuevos ítems van automático al KDS
-                  </p>
+                  <button
+                    onClick={() => setShowPay(true)}
+                    disabled={!invoice?.lines?.length}
+                    className="yall-order-pay-btn"
+                    style={btnPrimary}
+                  >
+                    💳 Cobrar
+                  </button>
+                </div>
+              ) : null}
+              {(!isMobile || showMobileActions) && (
+                <>
+                  {invoice?.lines?.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowDiscount(true)}
+                      className={isMobile ? "yall-order-action-btn" : undefined}
+                      style={btnSecondary}
+                    >
+                      {invoiceDiscount > 0
+                        ? (isMobile ? "✏️ Editar descuento" : "Editar descuento de cuenta")
+                        : (isMobile ? "🏷️ Descuento" : "Descuento en la cuenta")}
+                    </button>
+                  )}
+                  {invoice?.lines?.length > 1 && openInvoices.length === 1 && (
+                    <button
+                      onClick={() => setShowSplit(true)}
+                      className={isMobile ? "yall-order-action-btn" : undefined}
+                      style={btnSecondary}
+                    >
+                      {isMobile ? "🍴 Dividir cuenta" : "Dividir cuenta"}
+                    </button>
+                  )}
+                  <button
+                    onClick={sendToKitchen}
+                    disabled={!invoice?.lines?.length}
+                    className={isMobile ? "yall-order-action-btn" : undefined}
+                    style={btnSecondary}
+                  >
+                    {inKitchen
+                      ? (isMobile ? "🍳 Reenviar cocina" : "Reenviar comanda cocina")
+                      : (isMobile ? "🍳 Enviar a cocina" : "Enviar a cocina")}
+                  </button>
+                  {inKitchen && (
+                    <>
+                      <button
+                        onClick={reprintKitchen}
+                        disabled={reprintingKitchen}
+                        className={isMobile ? "yall-order-action-btn" : undefined}
+                        style={{
+                          ...btnSecondary,
+                          opacity: reprintingKitchen ? 0.7 : 1,
+                        }}
+                      >
+                        {reprintingKitchen ? "Imprimiendo…" : (isMobile ? "🖨️ Reimprimir" : "Reimprimir comanda")}
+                      </button>
+                      <p style={{ margin: 0, fontSize: 11, color: "var(--t-muted)", textAlign: "center" }}>
+                        Nuevos ítems van automático al KDS
+                      </p>
+                    </>
+                  )}
+                  {canVoid && (
+                    <button
+                      onClick={voidInvoice}
+                      disabled={voiding}
+                      className={isMobile ? "yall-order-action-btn" : undefined}
+                      style={{
+                        ...btnSecondary,
+                        borderColor: "#fecaca",
+                        color: "#b91c1c",
+                        opacity: voiding ? 0.7 : 1,
+                      }}
+                    >
+                      {voiding ? "Anulando…" : "Anular comanda"}
+                    </button>
+                  )}
                 </>
               )}
-              <button
-                onClick={() => setShowPay(true)}
-                disabled={!invoice?.lines?.length}
-                style={btnPrimary}
-              >
-                Cobrar
-              </button>
-              {canVoid && (
+              {!isMobile && (
                 <button
-                  onClick={voidInvoice}
-                  disabled={voiding}
-                  style={{
-                    ...btnSecondary,
-                    borderColor: "#fecaca",
-                    color: "#b91c1c",
-                    opacity: voiding ? 0.7 : 1,
-                  }}
+                  onClick={() => setShowPay(true)}
+                  disabled={!invoice?.lines?.length}
+                  style={btnPrimary}
                 >
-                  {voiding ? "Anulando…" : "Anular comanda"}
+                  Cobrar
                 </button>
               )}
             </div>
@@ -861,6 +1175,18 @@ export default function Order({
         </div>
         </div>
       </div>
+      {modifierProduct && (
+        <ModifierPickerModal
+          productName={modifierProduct.name}
+          groups={(modifierProduct.modifierGroups ?? []).map((row) => row.modifierGroup)}
+          onClose={() => setModifierProduct(null)}
+          onConfirm={async ({ modifiers, lineNotes }) => {
+            const current = modifierProduct;
+            setModifierProduct(null);
+            await addProductWithModifiers(current, modifiers, lineNotes);
+          }}
+        />
+      )}
     </div>
   );
 }

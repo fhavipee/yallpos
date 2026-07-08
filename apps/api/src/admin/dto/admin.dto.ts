@@ -110,7 +110,7 @@ export class AdjustStockDto {
 }
 
 export class UpsertModifierGroupDto {
-  @IsString() name!: string;
+  @IsOptional() @IsString() name?: string;
   @IsOptional() @IsInt() minSelect?: number;
   @IsOptional() @IsInt() maxSelect?: number;
   @IsOptional() @IsBoolean() isActive?: boolean;

@@ -35,6 +35,7 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
   const [waiters, setWaiters] = useState<{ id: string; name: string; phone?: string | null }[]>([]);
   const [savingWaiterId, setSavingWaiterId] = useState<string | null>(null);
   const [kiosk, setKiosk] = useState({ adminPin: "", hasAdminPin: false });
+  const [pos, setPos] = useState({ maxDiscountPercentWithoutPin: "10" });
 
   useEffect(() => {
     setBranchId(branchId);
@@ -63,6 +64,8 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
       });
       const k = r.data?.kiosk ?? {};
       setKiosk({ adminPin: "", hasAdminPin: Boolean(k.hasAdminPin) });
+      const p = r.data?.pos ?? {};
+      setPos({ maxDiscountPercentWithoutPin: String(p.maxDiscountPercentWithoutPin ?? 10) });
     }).catch(() => {});
     api.get("/v1/restaurant/waiters").then((r) => setWaiters(r.data)).catch(() => {});
     refreshAgent();
@@ -125,6 +128,18 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
         tableReadySlaMinutes: Number(notifications.tableReadySlaMinutes) || 8,
         tableReadySlaWebhookEnabled: notifications.tableReadySlaWebhookEnabled,
       },
+    });
+    flashSaved();
+  }
+
+  async function savePosSettings() {
+    const max = Number(pos.maxDiscountPercentWithoutPin);
+    if (!Number.isFinite(max) || max < 0 || max > 100) {
+      alert("El descuento máximo sin PIN debe estar entre 0 y 100");
+      return;
+    }
+    await api.patch("/v1/settings/branch", {
+      pos: { maxDiscountPercentWithoutPin: max },
     });
     flashSaved();
   }
@@ -361,6 +376,20 @@ node index.js`}
             </div>
           ))
         )}
+      </section>
+
+      <section style={sectionStyle}>
+        <h3>Punto de venta</h3>
+        <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 0 }}>
+          Descuentos y cortesías por encima de este porcentaje requieren PIN de gerente, dueño o administrador.
+        </p>
+        <Field
+          label="Descuento máximo sin PIN (%)"
+          value={pos.maxDiscountPercentWithoutPin}
+          onChange={(v) => setPos({ maxDiscountPercentWithoutPin: v.replace(/[^\d.]/g, "").slice(0, 5) })}
+          placeholder="10"
+        />
+        <button onClick={savePosSettings} style={btnSave}>Guardar POS</button>
       </section>
 
       <section style={sectionStyle}>

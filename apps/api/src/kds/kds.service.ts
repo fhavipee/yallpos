@@ -21,7 +21,7 @@ export class KdsService {
       where: {
         stationId,
         ticket: { branchId },
-        ...(status ? { status: status as any } : { status: { not: "served" as any } }),
+        ...(status ? { status: status as any } : { status: { notIn: ["served", "canceled"] as any } }),
       },
       orderBy: { createdAt: "asc" },
       include: { ticket: true, station: true },
@@ -43,7 +43,10 @@ export class KdsService {
     const invoiceMap = new Map(invoices.map((inv) => [inv.id, inv]));
 
     const lineIds = items.map((i) => i.invoiceLineId);
-    const lines = await this.prisma.salesInvoiceLine.findMany({ where: { id: { in: lineIds } } });
+    const lines = await this.prisma.salesInvoiceLine.findMany({
+      where: { id: { in: lineIds } },
+      include: { modifiers: true },
+    });
     const lineMap = new Map(lines.map((l) => [l.id, l]));
 
     const tableIds = [...new Set(items.map((i) => i.ticket.tableId).filter(Boolean))] as string[];
@@ -64,6 +67,7 @@ export class KdsService {
         productName: line?.nameSnapshot ?? "Producto",
         qty: Number(line?.qty ?? 1),
         lineNotes: line?.lineNotes,
+        modifiers: line?.modifiers?.map((m) => m.nameSnapshot) ?? [],
         tableName: table?.name ?? null,
         areaName: table?.area?.name ?? null,
         serviceType: invoice?.serviceType ?? null,
@@ -241,6 +245,63 @@ export class KdsService {
     payload: { invoiceId: string; label: string; reason?: string | null; serviceType?: string },
   ) {
     this.gateway.emitInvoiceVoided(branchId, payload);
+  }
+
+  async cancelLineItems(branchId: string, invoiceId: string, lineId: string) {
+    const items = await this.prisma.kdsItem.findMany({
+      where: {
+        invoiceLineId: lineId,
+        ticket: { branchId, invoiceId },
+        status: { notIn: ["served", "canceled"] },
+      },
+    });
+    if (items.length === 0) return { ok: false, updated: 0 };
+
+    await this.prisma.kdsItem.updateMany({
+      where: { id: { in: items.map((item) => item.id) } },
+      data: { status: "canceled" },
+    });
+
+    for (const item of items) {
+      this.gateway.emitKdsItemUpdated(branchId, item.stationId, {
+        ...item,
+        status: "canceled",
+      });
+    }
+
+    return { ok: true, updated: items.length };
+  }
+
+  notifyLineVoided(
+    branchId: string,
+    payload: {
+      invoiceId: string;
+      lineId: string;
+      label: string;
+      productName: string;
+      qty: number;
+      tableSessionId?: string | null;
+      tableId?: string | null;
+      serviceType?: string;
+      actor?: "waiter" | "kitchen";
+    },
+  ) {
+    this.gateway.emitLineVoided(branchId, payload);
+  }
+
+  notifyInvoiceUpdated(
+    branchId: string,
+    payload: {
+      invoiceId: string;
+      tableSessionId?: string | null;
+      tableId?: string | null;
+      serviceType?: string;
+      changeType: "line-discount" | "invoice-discount" | "line-removed";
+      lineId?: string;
+      productName?: string;
+    },
+  ) {
+    this.gateway.emitInvoiceUpdated(branchId, payload);
   }
 
   async upsertTicketFromInvoice(branchId: string, invoice: any) {

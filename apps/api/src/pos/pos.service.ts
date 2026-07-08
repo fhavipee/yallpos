@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateInvoiceDto } from "./dto/create-invoice.dto";
@@ -6,6 +6,7 @@ import { AddLineDto } from "./dto/add-line.dto";
 import { UpdateDeliveryDto } from "./dto/update-delivery.dto";
 import { UpdatePickupDto } from "./dto/update-pickup.dto";
 import { PayInvoiceDto } from "./dto/pay-invoice.dto";
+import { ApplyInvoiceDiscountDto, ApplyLineDiscountDto } from "./dto/apply-discount.dto";
 import { KdsService } from "../kds/kds.service";
 import { FiscalService } from "../fiscal/fiscal.service";
 import { OrderNotifyService } from "../notifications/order-notify.service";
@@ -27,8 +28,14 @@ import {
   buildTableReadyWaiterWhatsAppLink,
 } from "../restaurant/reservation-notify.util";
 import { readBranchNotificationSettings } from "../settings/branch-notifications.util";
+import {
+  discountPercentRequiresApproval,
+  readBranchPosSettings,
+  verifyDiscountApprovalPin,
+} from "../settings/branch-pos.util";
 import { calcLineAmountsFromRates } from "../common/tax.util";
 import { TaxDefinitionService } from "../tax/tax-definition.service";
+import { ReceiptService } from "../print/receipt.service";
 
 @Injectable()
 export class PosService {
@@ -38,6 +45,7 @@ export class PosService {
     private fiscal: FiscalService,
     private orderNotify: OrderNotifyService,
     private taxes: TaxDefinitionService,
+    private receipts: ReceiptService,
   ) {}
 
   private async getBranchNotificationSettings(branchId: string) {
@@ -66,7 +74,7 @@ export class PosService {
     const ts = await this.prisma.tableSession.findFirst({ where: { id: tableSessionId, branchId } });
     if (!ts || ts.status !== "open") throw new BadRequestException("Invalid table session");
 
-    return this.prisma.salesInvoice.findMany({
+    const invoices = await this.prisma.salesInvoice.findMany({
       where: { branchId, tableSessionId, status: { in: ["draft", "sent_to_kitchen"] as any } },
       orderBy: { createdAt: "asc" },
       include: {
@@ -74,6 +82,7 @@ export class PosService {
         tableSession: { include: { table: { include: { area: true } } } },
       },
     });
+    return Promise.all(invoices.map((invoice) => this.enrichInvoiceWithKitchenStatus(invoice)));
   }
 
   async getOrCreateDraftByTableSession(
@@ -106,13 +115,14 @@ export class PosService {
       });
       if (!selected) throw new NotFoundException("Comanda no encontrada");
       if (selected.waiterId !== ts.waiterId || selected.waiterUserId !== ts.waiterUserId) {
-        return this.prisma.salesInvoice.update({
+        const updated = await this.prisma.salesInvoice.update({
           where: { id: selected.id },
           data: { waiterId: ts.waiterId, waiterUserId: ts.waiterUserId },
           include: invoiceInclude,
         });
+        return this.enrichInvoiceWithKitchenStatus(updated);
       }
-      return selected;
+      return this.enrichInvoiceWithKitchenStatus(selected);
     }
 
     const existing = await this.prisma.salesInvoice.findFirst({
@@ -123,16 +133,17 @@ export class PosService {
 
     if (existing) {
       if (existing.waiterId !== ts.waiterId || existing.waiterUserId !== ts.waiterUserId) {
-        return this.prisma.salesInvoice.update({
+        const updated = await this.prisma.salesInvoice.update({
           where: { id: existing.id },
           data: { waiterId: ts.waiterId, waiterUserId: ts.waiterUserId },
           include: invoiceInclude,
         });
+        return this.enrichInvoiceWithKitchenStatus(updated);
       }
-      return existing;
+      return this.enrichInvoiceWithKitchenStatus(existing);
     }
 
-    return this.prisma.salesInvoice.create({
+    const created = await this.prisma.salesInvoice.create({
       data: {
         companyId,
         branchId,
@@ -147,6 +158,7 @@ export class PosService {
       },
       include: invoiceInclude,
     });
+    return this.enrichInvoiceWithKitchenStatus(created);
   }
 
   private readonly counterStyleInclude = {
@@ -1065,23 +1077,86 @@ export class PosService {
     });
 
     await this.kds.upsertTicketFromInvoice(branchId, updated);
-    return updated;
+    return this.getInvoice(branchId, invoiceId);
   }
 
-  async removeLine(branchId: string, invoiceId: string, lineId: string) {
-    const invoice = await this.prisma.salesInvoice.findFirst({ where: { id: invoiceId, branchId } });
+  async removeLine(
+    branchId: string,
+    invoiceId: string,
+    lineId: string,
+    options: { actor: "waiter" | "kitchen" } = { actor: "waiter" },
+  ) {
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id: invoiceId, branchId },
+      include: {
+        tableSession: { include: { table: { include: { area: true } } } },
+      },
+    });
     if (!invoice) throw new NotFoundException("Invoice not found");
     if (invoice.status === "paid" || invoice.status === "voided") throw new BadRequestException("Invoice not editable");
 
-    const line = await this.prisma.salesInvoiceLine.findFirst({ where: { id: lineId, invoiceId } });
+    const line = await this.prisma.salesInvoiceLine.findFirst({
+      where: { id: lineId, invoiceId },
+      include: { modifiers: true },
+    });
     if (!line) throw new NotFoundException("Line not found");
+
+    const kdsItems = await this.prisma.kdsItem.findMany({
+      where: {
+        invoiceLineId: lineId,
+        ticket: { branchId, invoiceId },
+      },
+    });
+    const activeItems = kdsItems.filter((item) => item.status !== "canceled");
+    const blockedForWaiter = activeItems.some((item) =>
+      ["preparing", "ready", "served"].includes(item.status),
+    );
+    if (options.actor === "waiter" && blockedForWaiter) {
+      throw new BadRequestException("Este producto ya está en preparación. Solo cocina puede anularlo.");
+    }
+    if (options.actor === "kitchen" && activeItems.some((item) => item.status === "served")) {
+      throw new BadRequestException("Este producto ya fue entregado y no se puede anular.");
+    }
+
+    const wasInKitchen = invoice.status === "sent_to_kitchen";
+    let kitchenLineVoidEscpos: { base64: string; bytes: number } | null = null;
+
+    if (wasInKitchen && activeItems.length > 0) {
+      const canceled = await this.kds.cancelLineItems(branchId, invoiceId, lineId);
+      if (canceled.updated > 0) {
+        kitchenLineVoidEscpos = await this.receipts.getKitchenLineVoidEscPosBase64(branchId, invoiceId, {
+          qty: String(line.qty),
+          name: line.nameSnapshot,
+          modifiers: line.modifiers.map((m) => m.nameSnapshot),
+          notes: line.lineNotes ?? undefined,
+        });
+      }
+    }
 
     await this.prisma.kdsItem.deleteMany({ where: { invoiceLineId: lineId } });
     await this.prisma.salesLineModifier.deleteMany({ where: { invoiceLineId: lineId } });
     await this.prisma.salesInvoiceLine.delete({ where: { id: lineId } });
     await this.recalcInvoiceTotals(invoiceId);
 
-    return this.getInvoice(branchId, invoiceId);
+    if (wasInKitchen) {
+      const label = invoice.tableSessionId
+        ? this.buildTableOrderLabel(invoice)
+        : this.buildCounterOrderLabel(invoice);
+      this.kds.notifyLineVoided(branchId, {
+        invoiceId,
+        lineId,
+        tableSessionId: invoice.tableSessionId,
+        tableId: invoice.tableId,
+        serviceType: invoice.serviceType,
+        label,
+        productName: line.nameSnapshot,
+        qty: Number(line.qty),
+        actor: options.actor,
+      });
+    }
+
+    const updated = await this.getInvoice(branchId, invoiceId);
+    return { ...updated, kitchenLineVoidEscpos };
   }
 
   async updateLineQty(branchId: string, invoiceId: string, lineId: string, qty: string) {
@@ -1104,17 +1179,230 @@ export class PosService {
     }
 
     const modifiersTotal = line.modifiers.reduce((sum, mod) => sum + Number(mod.priceDeltaSnapshot ?? "0"), 0);
-    const unitNum = Number(line.unitPrice);
-    const grossAmount = qtyNum * unitNum + modifiersTotal;
+    const previousGross = Number(line.qty) * Number(line.unitPrice) + modifiersTotal;
+
+    await this.prisma.salesInvoiceLine.update({
+      where: { id: lineId },
+      data: { qty },
+    });
+
+    await this.recalcLineTotals(lineId, invoice.companyId, previousGross);
+    await this.recalcInvoiceTotals(invoiceId);
+    return this.getInvoice(branchId, invoiceId);
+  }
+
+  async applyLineDiscount(branchId: string, invoiceId: string, lineId: string, dto: ApplyLineDiscountDto) {
+    const invoice = await this.assertInvoiceEditable(branchId, invoiceId);
+    const line = await this.prisma.salesInvoiceLine.findFirst({
+      where: { id: lineId, invoiceId },
+      include: { modifiers: true },
+    });
+    if (!line) throw new NotFoundException("Line not found");
+
+    const gross = this.lineGrossAmount(line);
+    let lineDiscount = 0;
+    let discountPercent = 0;
+    if (dto.kind === "courtesy") {
+      lineDiscount = gross;
+      discountPercent = gross > 0 ? 100 : 0;
+    } else if (dto.kind === "percent") {
+      const pct = Number(dto.value);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        throw new BadRequestException("Porcentaje invalido (0-100)");
+      }
+      discountPercent = pct;
+      lineDiscount = Math.round(gross * pct / 100);
+    } else if (dto.kind === "amount") {
+      lineDiscount = Number(dto.value);
+      if (!Number.isFinite(lineDiscount) || lineDiscount < 0) {
+        throw new BadRequestException("Monto de descuento invalido");
+      }
+      discountPercent = gross > 0 ? (lineDiscount / gross) * 100 : 0;
+    }
+
+    if (dto.kind !== "clear") {
+      await this.assertDiscountApproved(branchId, discountPercent, dto.approvalPin);
+    }
+
+    lineDiscount = Math.min(Math.max(0, Math.round(lineDiscount)), gross);
+
+    const noteSuffix = dto.reason?.trim()
+      ? dto.reason.trim()
+      : dto.kind === "courtesy"
+        ? "Cortesia"
+        : null;
+    let lineNotes = line.lineNotes;
+    if (dto.kind === "clear") {
+      lineNotes = line.lineNotes?.replace(/^\[Cortesia\]\s*/i, "").trim() || null;
+    } else if (noteSuffix && dto.kind === "courtesy") {
+      const base = line.lineNotes?.replace(/^\[Cortesia\]\s*/i, "").trim();
+      lineNotes = base ? `[Cortesia] ${noteSuffix} · ${base}` : `[Cortesia] ${noteSuffix}`;
+    }
+
+    await this.prisma.salesInvoiceLine.update({
+      where: { id: lineId },
+      data: {
+        lineDiscount: String(lineDiscount),
+        lineNotes,
+      },
+    });
+
+    await this.recalcLineTotals(lineId, invoice.companyId);
+    await this.recalcInvoiceTotals(invoiceId);
+    const updated = await this.getInvoice(branchId, invoiceId);
+    this.notifyInvoiceDiscountChange(branchId, invoice, "line-discount", {
+      lineId,
+      productName: line.nameSnapshot,
+    });
+    return updated;
+  }
+
+  async applyInvoiceDiscount(branchId: string, invoiceId: string, dto: ApplyInvoiceDiscountDto) {
+    const invoice = await this.assertInvoiceEditable(branchId, invoiceId);
+
+    const lines = await this.prisma.salesInvoiceLine.findMany({ where: { invoiceId } });
+    const linesTotal = lines.reduce((sum, line) => sum + Number(line.lineTotal), 0);
+
+    let discount = 0;
+    let discountPercent = 0;
+    if (dto.kind === "percent") {
+      const pct = Number(dto.value);
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) {
+        throw new BadRequestException("Porcentaje invalido (0-100)");
+      }
+      discountPercent = pct;
+      discount = Math.round(linesTotal * pct / 100);
+    } else if (dto.kind === "amount") {
+      discount = Number(dto.value);
+      if (!Number.isFinite(discount) || discount < 0) {
+        throw new BadRequestException("Monto de descuento invalido");
+      }
+      discountPercent = linesTotal > 0 ? (discount / linesTotal) * 100 : 0;
+    }
+
+    if (dto.kind !== "clear") {
+      await this.assertDiscountApproved(branchId, discountPercent, dto.approvalPin);
+    }
+
+    discount = Math.min(Math.max(0, Math.round(discount)), linesTotal);
+
+    let notes = invoice.notes;
+    if (dto.kind === "clear") {
+      notes = invoice.notes?.split("\n").filter((line) => !line.startsWith("[Descuento]")).join("\n").trim() || null;
+    } else if (dto.reason?.trim()) {
+      const base = invoice.notes?.split("\n").filter((line) => !line.startsWith("[Descuento]")).join("\n").trim();
+      const discountNote = `[Descuento] ${dto.reason.trim()}`;
+      notes = base ? `${base}\n${discountNote}` : discountNote;
+    }
+
+    await this.prisma.salesInvoice.update({
+      where: { id: invoiceId },
+      data: {
+        discount: String(discount),
+        notes: notes || null,
+      },
+    });
+
+    await this.recalcInvoiceTotals(invoiceId);
+    const updated = await this.getInvoice(branchId, invoiceId);
+    this.notifyInvoiceDiscountChange(branchId, invoice, "invoice-discount");
+    return updated;
+  }
+
+  private async assertDiscountApproved(branchId: string, discountPercent: number, approvalPin?: string) {
+    const posSettings = await readBranchPosSettings(this.prisma, branchId);
+    if (!discountPercentRequiresApproval(discountPercent, posSettings.maxDiscountPercentWithoutPin)) {
+      return;
+    }
+    if (!approvalPin?.trim()) {
+      throw new ForbiddenException({
+        code: "DISCOUNT_PIN_REQUIRED",
+        message: `Descuento superior al ${posSettings.maxDiscountPercentWithoutPin}% requiere PIN de supervisor`,
+        maxWithoutPin: posSettings.maxDiscountPercentWithoutPin,
+      });
+    }
+    const branch = await this.prisma.branch.findUnique({
+      where: { id: branchId },
+      select: { company: { select: { tenantId: true } } },
+    });
+    if (!branch) throw new NotFoundException("Branch not found");
+    await verifyDiscountApprovalPin(this.prisma, branchId, branch.company.tenantId, approvalPin.trim());
+  }
+
+  private notifyInvoiceDiscountChange(
+    branchId: string,
+    invoice: {
+      id: string;
+      tableSessionId?: string | null;
+      tableId?: string | null;
+      serviceType?: string | null;
+    },
+    changeType: "line-discount" | "invoice-discount",
+    extra?: { lineId?: string; productName?: string },
+  ) {
+    this.kds.notifyInvoiceUpdated(branchId, {
+      invoiceId: invoice.id,
+      tableSessionId: invoice.tableSessionId,
+      tableId: invoice.tableId,
+      serviceType: invoice.serviceType ?? undefined,
+      changeType,
+      ...extra,
+    });
+    if (invoice.tableSessionId) {
+      this.kds.notifyTableUpdated(branchId, {
+        tableSessionId: invoice.tableSessionId,
+        tableId: invoice.tableId ?? undefined,
+        status: "updated",
+      });
+    }
+  }
+
+  private async assertInvoiceEditable(branchId: string, invoiceId: string) {
+    const invoice = await this.prisma.salesInvoice.findFirst({ where: { id: invoiceId, branchId } });
+    if (!invoice) throw new NotFoundException("Invoice not found");
+    if (invoice.status === "paid" || invoice.status === "voided") {
+      throw new BadRequestException("Invoice not editable");
+    }
+    return invoice;
+  }
+
+  private lineGrossAmount(line: {
+    qty: Prisma.Decimal | string | number;
+    unitPrice: Prisma.Decimal | string | number;
+    modifiers?: { priceDeltaSnapshot?: Prisma.Decimal | string | null }[];
+  }) {
+    const modifiersTotal = (line.modifiers ?? []).reduce(
+      (sum, mod) => sum + Number(mod.priceDeltaSnapshot ?? "0"),
+      0,
+    );
+    return Number(line.qty) * Number(line.unitPrice) + modifiersTotal;
+  }
+
+  private async recalcLineTotals(lineId: string, companyId: string, previousGross?: number) {
+    const line = await this.prisma.salesInvoiceLine.findFirst({
+      where: { id: lineId },
+      include: { modifiers: true },
+    });
+    if (!line) return;
+
+    const gross = this.lineGrossAmount(line);
+    let lineDiscount = Number(line.lineDiscount);
+    if (previousGross != null && lineDiscount >= previousGross - 1) {
+      lineDiscount = gross;
+    }
+    lineDiscount = Math.min(Math.max(0, lineDiscount), gross);
+
     let ivaRate = line.ivaRateSnapshot != null ? Number(line.ivaRateSnapshot) : undefined;
     let consumptionRate = line.consumptionRateSnapshot != null ? Number(line.consumptionRateSnapshot) : undefined;
     if (ivaRate == null || consumptionRate == null) {
-      const resolved = await this.taxes.resolveRates(invoice.companyId, line.ivaTaxCode, line.consumptionTaxCode);
+      const resolved = await this.taxes.resolveRates(companyId, line.ivaTaxCode, line.consumptionTaxCode);
       ivaRate = ivaRate ?? resolved.ivaRate;
       consumptionRate = consumptionRate ?? resolved.consumptionRate;
     }
+
+    const netGross = gross - lineDiscount;
     const { lineSubtotal, lineConsumptionTax, lineTax, lineTotal } = calcLineAmountsFromRates(
-      grossAmount,
+      netGross,
       ivaRate,
       consumptionRate,
     );
@@ -1122,16 +1410,13 @@ export class PosService {
     await this.prisma.salesInvoiceLine.update({
       where: { id: lineId },
       data: {
-        qty,
+        lineDiscount: String(lineDiscount),
         lineSubtotal: String(lineSubtotal),
         lineConsumptionTax: String(lineConsumptionTax),
         lineTax: String(lineTax),
         lineTotal: String(lineTotal),
       },
     });
-
-    await this.recalcInvoiceTotals(invoiceId);
-    return this.getInvoice(branchId, invoiceId);
   }
 
   async updateLineNote(branchId: string, invoiceId: string, lineId: string, lineNotes: string) {
@@ -1162,7 +1447,7 @@ export class PosService {
     }
 
     const uniqueIds = [...new Set(lineIds)];
-    const linesToMove = invoice.lines.filter((l) => uniqueIds.includes(l.id));
+    const linesToMove = invoice.lines.filter((l: any) => uniqueIds.includes(l.id));
     if (linesToMove.length === 0) throw new BadRequestException("Selecciona al menos un ítem");
     if (linesToMove.length >= invoice.lines.length) {
       throw new BadRequestException("Debe quedar al menos un ítem en la cuenta original");
@@ -1186,12 +1471,12 @@ export class PosService {
       });
 
       await tx.salesInvoiceLine.updateMany({
-        where: { id: { in: linesToMove.map((l) => l.id) }, invoiceId: invoice.id },
+        where: { id: { in: linesToMove.map((l: any) => l.id) }, invoiceId: invoice.id },
         data: { invoiceId: created.id },
       });
 
       const movedKdsItems = await tx.kdsItem.findMany({
-        where: { invoiceLineId: { in: linesToMove.map((l) => l.id) } },
+        where: { invoiceLineId: { in: linesToMove.map((l: any) => l.id) } },
       });
 
       if (movedKdsItems.length) {
@@ -1316,7 +1601,7 @@ export class PosService {
   }
 
   async getInvoice(branchId: string, invoiceId: string) {
-    return this.prisma.salesInvoice.findFirst({
+    const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, branchId },
       include: {
         lines: { include: { modifiers: true } },
@@ -1325,6 +1610,32 @@ export class PosService {
         tableSession: { include: { table: { include: { area: true } } } },
       },
     });
+    if (!invoice) return null;
+    return this.enrichInvoiceWithKitchenStatus(invoice);
+  }
+
+  private async enrichInvoiceWithKitchenStatus(invoice: any) {
+    if (!invoice?.lines?.length) return invoice;
+
+    const kdsItems = await this.prisma.kdsItem.findMany({
+      where: { invoiceLineId: { in: invoice.lines.map((line: any) => line.id) } },
+      select: { invoiceLineId: true, status: true },
+      orderBy: { createdAt: "desc" },
+    });
+    const statusByLine = new Map<string, string>();
+    for (const item of kdsItems) {
+      if (!statusByLine.has(item.invoiceLineId)) {
+        statusByLine.set(item.invoiceLineId, item.status);
+      }
+    }
+
+    return {
+      ...invoice,
+      lines: invoice.lines.map((line: any) => ({
+        ...line,
+        kitchenStatus: statusByLine.get(line.id) ?? null,
+      })),
+    };
   }
 
   private async deductStock(tx: any, branchId: string, lines: any[]) {
@@ -1396,11 +1707,16 @@ export class PosService {
   }
 
   private async recalcInvoiceTotals(invoiceId: string) {
+    const invoice = await this.prisma.salesInvoice.findUnique({ where: { id: invoiceId } });
+    if (!invoice) return;
+
     const lines = await this.prisma.salesInvoiceLine.findMany({ where: { invoiceId } });
     const subtotal = lines.reduce((sum: number, l: any) => sum + Number(l.lineSubtotal), 0);
     const consumptionTax = lines.reduce((sum: number, l: any) => sum + Number(l.lineConsumptionTax), 0);
     const tax = lines.reduce((sum: number, l: any) => sum + Number(l.lineTax), 0);
-    const total = lines.reduce((sum: number, l: any) => sum + Number(l.lineTotal), 0);
+    const linesTotal = lines.reduce((sum: number, l: any) => sum + Number(l.lineTotal), 0);
+    const discount = Math.min(Number(invoice.discount), linesTotal);
+    const total = Math.max(0, linesTotal - discount);
 
     await this.prisma.salesInvoice.update({
       where: { id: invoiceId },
@@ -1408,6 +1724,7 @@ export class PosService {
         subtotal: String(subtotal),
         consumptionTax: String(consumptionTax),
         tax: String(tax),
+        discount: String(discount),
         total: String(total),
       },
     });

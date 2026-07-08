@@ -5,6 +5,9 @@ type PaymentMethod = "cash" | "card" | "transfer" | "qr";
 
 type Props = {
   total: number;
+  linesTotal?: number;
+  invoiceDiscount?: number;
+  onOpenDiscount?: () => void;
   onConfirm: (data: {
     payments: { method: PaymentMethod; amount: string }[];
     tipAmount: string;
@@ -12,7 +15,14 @@ type Props = {
   onClose: () => void;
 };
 
-export default function PaymentModal({ total, onConfirm, onClose }: Props) {
+export default function PaymentModal({
+  total,
+  linesTotal,
+  invoiceDiscount = 0,
+  onOpenDiscount,
+  onConfirm,
+  onClose,
+}: Props) {
   const [tip, setTip] = useState("");
   const [split, setSplit] = useState(false);
   const [method1, setMethod1] = useState<PaymentMethod>("cash");
@@ -72,7 +82,38 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
     }}>
       <div style={{ background: "var(--t-card)", color: "var(--t-fg)", borderRadius: 16, padding: 24, width: 400, maxWidth: "92vw", maxHeight: "90vh", overflow: "auto", border: "1px solid var(--t-border)" }}>
         <h3 style={{ margin: "0 0 8px", color: "var(--t-fg)" }}>Cobrar</h3>
-        <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 16 }}>{formatCOP(total)}</div>
+        {invoiceDiscount > 0 && linesTotal != null && (
+          <div style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Subtotal</span>
+              <span>{formatCOP(linesTotal)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", color: "#b91c1c" }}>
+              <span>Descuento</span>
+              <span>-{formatCOP(invoiceDiscount)}</span>
+            </div>
+          </div>
+        )}
+        <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 8 }}>{formatCOP(total)}</div>
+        {onOpenDiscount && (
+          <button
+            type="button"
+            onClick={onOpenDiscount}
+            style={{
+              marginBottom: 16,
+              padding: "8px 12px",
+              borderRadius: 8,
+              border: "1px solid var(--t-border-strong)",
+              background: "var(--t-card-alt)",
+              color: "var(--t-fg)",
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            {invoiceDiscount > 0 ? "✏️ Editar descuento" : "🏷️ Aplicar descuento"}
+          </button>
+        )}
 
         <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
           {tipPresets.map((p, i) => (

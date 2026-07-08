@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { BranchId } from "../common/decorators/branch-id.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
-import { CASH_ROLES, FLOOR_ROLES } from "../auth/auth.types";
+import { CASH_ROLES, FLOOR_ROLES, KITCHEN_ROLES } from "../auth/auth.types";
 import { PosService } from "./pos.service";
 import { CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { AddLineDto } from "./dto/add-line.dto";
@@ -11,6 +11,7 @@ import { UpdateDeliveryDto } from "./dto/update-delivery.dto";
 import { UpdatePickupDto } from "./dto/update-pickup.dto";
 import { PayInvoiceDto } from "./dto/pay-invoice.dto";
 import { SplitInvoiceDto } from "./dto/split-invoice.dto";
+import { ApplyInvoiceDiscountDto, ApplyLineDiscountDto } from "./dto/apply-discount.dto";
 import { PrismaService } from "../prisma/prisma.service";
 
 @Controller("v1/pos")
@@ -164,7 +165,13 @@ export class PosController {
   @Roles(...FLOOR_ROLES)
   @Post("invoices/:id/lines/:lineId/remove")
   removeLine(@BranchId() branchId: string, @Param("id") id: string, @Param("lineId") lineId: string) {
-    return this.service.removeLine(branchId, id, lineId);
+    return this.service.removeLine(branchId, id, lineId, { actor: "waiter" });
+  }
+
+  @Roles(...KITCHEN_ROLES)
+  @Post("invoices/:id/lines/:lineId/void-from-kitchen")
+  voidLineFromKitchen(@BranchId() branchId: string, @Param("id") id: string, @Param("lineId") lineId: string) {
+    return this.service.removeLine(branchId, id, lineId, { actor: "kitchen" });
   }
 
   @Roles(...FLOOR_ROLES)
@@ -193,6 +200,27 @@ export class PosController {
   @Post("invoices/:id/split")
   splitInvoice(@BranchId() branchId: string, @Param("id") id: string, @Body() dto: SplitInvoiceDto) {
     return this.service.splitInvoice(branchId, id, dto.lineIds);
+  }
+
+  @Roles(...FLOOR_ROLES)
+  @Patch("invoices/:id/discount")
+  applyInvoiceDiscount(
+    @BranchId() branchId: string,
+    @Param("id") id: string,
+    @Body() dto: ApplyInvoiceDiscountDto,
+  ) {
+    return this.service.applyInvoiceDiscount(branchId, id, dto);
+  }
+
+  @Roles(...FLOOR_ROLES)
+  @Patch("invoices/:id/lines/:lineId/discount")
+  applyLineDiscount(
+    @BranchId() branchId: string,
+    @Param("id") id: string,
+    @Param("lineId") lineId: string,
+    @Body() dto: ApplyLineDiscountDto,
+  ) {
+    return this.service.applyLineDiscount(branchId, id, lineId, dto);
   }
 
   @Roles(...FLOOR_ROLES)

@@ -24,11 +24,13 @@ type PinAction = "exit" | "logout" | "identify" | null;
 export default function WaiterKioskShell({
   branchId,
   branchName,
+  companyBrand,
   user,
   onLogout,
 }: {
   branchId: string;
   branchName?: string;
+  companyBrand?: string;
   user: AuthUser;
   onLogout: () => void;
 }) {
@@ -231,9 +233,11 @@ export default function WaiterKioskShell({
         zIndex: 20,
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 18 }}>YallPos · Mesero</div>
+          <div style={{ fontWeight: 800, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {companyBrand || "YallPos"}
+          </div>
           <div style={{ fontSize: 12, opacity: 0.85, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            {branchName ?? "Restaurante"} · {waiterLabel}
+            {companyBrand ? "YallPos · Mesero" : "Mesero"} · {branchName ?? "Restaurante"} · {waiterLabel}
           </div>
         </div>
         <button

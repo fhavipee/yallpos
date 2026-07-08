@@ -978,10 +978,11 @@ export class AdminService {
 
   async createModifierGroup(branchId: string, user: AuthUser, dto: UpsertModifierGroupDto) {
     await this.branchContext(branchId, user.tenantId);
+    if (!dto.name?.trim()) throw new BadRequestException("Nombre requerido");
     const created = await this.prisma.modifierGroup.create({
       data: {
         branchId,
-        name: dto.name,
+        name: dto.name.trim(),
         minSelect: dto.minSelect ?? 0,
         maxSelect: dto.maxSelect ?? 1,
         isActive: dto.isActive ?? true,
@@ -1001,14 +1002,22 @@ export class AdminService {
     await this.branchContext(branchId, user.tenantId);
     const group = await this.prisma.modifierGroup.findFirst({ where: { id, branchId } });
     if (!group) throw new NotFoundException("Grupo no encontrado");
+    const updateData: {
+      name?: string;
+      minSelect?: number;
+      maxSelect?: number;
+      isActive?: boolean;
+    } = {};
+    if (dto.name !== undefined) {
+      if (!dto.name.trim()) throw new BadRequestException("Nombre requerido");
+      updateData.name = dto.name.trim();
+    }
+    if (dto.minSelect !== undefined) updateData.minSelect = dto.minSelect;
+    if (dto.maxSelect !== undefined) updateData.maxSelect = dto.maxSelect;
+    if (dto.isActive !== undefined) updateData.isActive = dto.isActive;
     await this.prisma.modifierGroup.update({
       where: { id },
-      data: {
-        name: dto.name,
-        minSelect: dto.minSelect,
-        maxSelect: dto.maxSelect,
-        isActive: dto.isActive ?? group.isActive,
-      },
+      data: updateData,
     });
     if (dto.productIds) {
       await this.prisma.productModifierGroup.deleteMany({ where: { modifierGroupId: id } });

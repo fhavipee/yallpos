@@ -37,6 +37,14 @@ export class KdsGateway implements OnGatewayConnection {
     this.server.to(`branch:${branchId}`).emit("kds.invoice.voided", payload);
   }
 
+  emitLineVoided(branchId: string, payload: any) {
+    this.server.to(`branch:${branchId}`).emit("kds.line.voided", payload);
+  }
+
+  emitInvoiceUpdated(branchId: string, payload: any) {
+    this.server.to(`branch:${branchId}`).emit("pos.invoice.updated", payload);
+  }
+
   emitTableReady(branchId: string, payload: any) {
     this.server.to(`branch:${branchId}`).emit("kds.table.ready", payload);
   }

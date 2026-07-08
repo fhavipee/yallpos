@@ -20,7 +20,7 @@ export class ReceiptService {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, branchId },
       include: {
-        lines: true,
+        lines: { include: { modifiers: true } },
         payments: true,
         fiscalDocuments: { orderBy: { issuedAt: "desc" }, take: 1 },
         branch: { include: { company: true } },
@@ -92,11 +92,15 @@ export class ReceiptService {
         name: l.nameSnapshot,
         qty: String(l.qty),
         total: Number(l.lineTotal),
+        discount: Number(l.lineDiscount) > 0 ? Number(l.lineDiscount) : undefined,
+        modifiers: l.modifiers.map((m) => m.nameSnapshot),
+        notes: l.lineNotes ?? undefined,
       })),
       subtotal: Number(invoice.subtotal),
       tax: Number(invoice.tax),
       consumptionTax: Number(invoice.consumptionTax),
       taxBreakdown: aggregateTaxBreakdown(invoice.lines, labelFor),
+      discount: Number(invoice.discount) > 0 ? Number(invoice.discount) : undefined,
       total: Number(invoice.total) + Number(invoice.tipAmount) + deliveryFee,
       tip: Number(invoice.tipAmount) || undefined,
       payments: invoice.payments.map((p) => ({
@@ -118,7 +122,13 @@ export class ReceiptService {
     const rows = d.lines
       .map(
         (l) =>
-          `<tr><td>${l.name}</td><td style="text-align:center">${l.qty}</td><td style="text-align:right">$${l.total.toLocaleString("es-CO")}</td></tr>`,
+          `<tr><td>${
+            l.name
+          }${
+            l.modifiers?.length ? `<div style="font-size:11px;color:#666">+ ${l.modifiers.join(" · ")}</div>` : ""
+          }${
+            l.notes ? `<div style="font-size:11px;color:#666">↳ ${l.notes}</div>` : ""
+          }</td><td style="text-align:center">${l.qty}</td><td style="text-align:right">$${l.total.toLocaleString("es-CO")}</td></tr>`,
       )
       .join("");
 
@@ -189,6 +199,7 @@ export class ReceiptService {
   }
   ${d.tip ? `<div>Propina: $${d.tip.toLocaleString("es-CO")}</div>` : ""}
   ${d.deliveryInfo?.fee ? `<div>Domicilio: $${d.deliveryInfo.fee.toLocaleString("es-CO")}</div>` : ""}
+  ${d.discount ? `<div>Descuento: -$${d.discount.toLocaleString("es-CO")}</div>` : ""}
   <div class="total">TOTAL: $${d.total.toLocaleString("es-CO")}</div>
   <hr>
   ${d.payments.map((p) => `<div>${p.method.toUpperCase()}: $${p.amount.toLocaleString("es-CO")}</div>`).join("")}
@@ -202,7 +213,7 @@ export class ReceiptService {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, branchId },
       include: {
-        lines: true,
+        lines: { include: { modifiers: true } },
         branch: true,
         tableSession: { include: { table: { include: { area: true } } } },
       },
@@ -223,8 +234,11 @@ export class ReceiptService {
     const now = new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" });
     const rows = invoice.lines
       .map((l) => {
+        const modifiers = l.modifiers.length
+          ? `<div style="font-size:11px;color:#475569">+ ${l.modifiers.map((m) => m.nameSnapshot).join(" · ")}</div>`
+          : "";
         const note = l.lineNotes ? `<div style="font-size:11px;color:#666">↳ ${l.lineNotes}</div>` : "";
-        return `<div style="margin-bottom:8px"><strong>${l.qty}× ${l.nameSnapshot}</strong>${note}</div>`;
+        return `<div style="margin-bottom:8px"><strong>${l.qty}× ${l.nameSnapshot}</strong>${modifiers}${note}</div>`;
       })
       .join("");
 
@@ -278,11 +292,60 @@ ${data.reason ? `<div class="meta"><strong>Motivo:</strong> ${data.reason}</div>
     return { base64: buf.toString("base64"), bytes: buf.length };
   }
 
+  async getKitchenLineVoidHtml(
+    branchId: string,
+    invoiceId: string,
+    line: { qty: string; name: string; modifiers?: string[]; notes?: string },
+  ): Promise<string> {
+    const data = await this.getKitchenLineVoidData(branchId, invoiceId, line);
+    const note = line.notes ? `<div style="font-size:11px;color:#666">↳ ${line.notes}</div>` : "";
+    const mods = line.modifiers?.length
+      ? `<div style="font-size:11px;color:#666">+ ${line.modifiers.join(" · ")}</div>`
+      : "";
+    const row = `<div style="margin-bottom:8px"><strong>${line.qty}× ${line.name}</strong>${mods}${note}</div>`;
+
+    return `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Producto anulado</title>
+<style>@media print{@page{margin:4mm;size:80mm auto}}body{font-family:monospace;font-size:13px;width:72mm;margin:0 auto}
+h1{font-size:16px;text-align:center;margin:0;color:#b91c1c}.meta{font-size:12px;margin:4px 0}hr{border:none;border-top:2px dashed #000}
+</style></head><body>
+<h1>⛔ ANULADO COCINA</h1>
+<div class="meta"><strong>${data.tableLabel}</strong></div>
+<div class="meta">Mesero: ${data.waiterName} · ${data.guestsCount ?? "?"} comensales</div>
+<div class="meta">${data.printedAt}</div>
+<hr>${row}<hr>
+<div style="text-align:center;font-size:11px;color:#b91c1c"><strong>NO PREPARAR ESTE PRODUCTO</strong></div>
+<script>window.onload=()=>window.print()</script></body></html>`;
+  }
+
+  async getKitchenLineVoidEscPosBase64(
+    branchId: string,
+    invoiceId: string,
+    line: { qty: string; name: string; modifiers?: string[]; notes?: string },
+  ): Promise<{ base64: string; bytes: number }> {
+    const { buildEscPosKitchenVoid } = await import("./escpos.encoder");
+    const data = await this.getKitchenLineVoidData(branchId, invoiceId, line);
+    const buf = buildEscPosKitchenVoid(data);
+    return { base64: buf.toString("base64"), bytes: buf.length };
+  }
+
+  private async getKitchenLineVoidData(
+    branchId: string,
+    invoiceId: string,
+    line: { qty: string; name: string; modifiers?: string[]; notes?: string },
+  ) {
+    const base = await this.getKitchenData(branchId, invoiceId);
+    return {
+      ...base,
+      lines: [line],
+      reason: "Producto anulado desde comanda",
+    };
+  }
+
   private async getKitchenData(branchId: string, invoiceId: string) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, branchId },
       include: {
-        lines: true,
+        lines: { include: { modifiers: true } },
         tableSession: { include: { table: { include: { area: true } } } },
       },
     });
@@ -306,6 +369,7 @@ ${data.reason ? `<div class="meta"><strong>Motivo:</strong> ${data.reason}</div>
       lines: invoice.lines.map((l) => ({
         qty: String(l.qty),
         name: l.nameSnapshot,
+        modifiers: l.modifiers.map((m) => m.nameSnapshot),
         notes: l.lineNotes ?? undefined,
       })),
       printedAt: new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" }),
