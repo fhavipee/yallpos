@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { api } from "../../../lib/api";
+import CategoryImagePicker from "../../../components/CategoryImagePicker";
+import { categoryImageLabel, suggestCategoryImage } from "../../../lib/categoryImages";
 import { useAdminAction } from "../hooks/useAdminAction";
 import { useAdminResource } from "../hooks/useAdminResource";
 import {
@@ -19,15 +21,36 @@ import {
 type Category = {
   id: string;
   name: string;
+  description?: string | null;
   color?: string;
+  imageUrl?: string | null;
+  mobileDisplay?: "image" | "description";
   sortOrder: number;
   isActive: boolean;
 };
 
+type FormState = {
+  name: string;
+  description: string;
+  color: string;
+  imageUrl: string;
+  mobileDisplay: "image" | "description";
+  sortOrder: number;
+};
+
+const emptyForm = (sortOrder = 0): FormState => ({
+  name: "",
+  description: "",
+  color: "#2563eb",
+  imageUrl: "",
+  mobileDisplay: "image",
+  sortOrder,
+});
+
 export default function AdminCategoriesView() {
   const runAction = useAdminAction();
   const [modal, setModal] = useState<"new" | Category | null>(null);
-  const [form, setForm] = useState({ name: "", color: "#2563eb", sortOrder: 0 });
+  const [form, setForm] = useState<FormState>(emptyForm());
   const [saving, setSaving] = useState(false);
 
   const { data: categories, loading, error, reload } = useAdminResource(async () => {
@@ -38,22 +61,49 @@ export default function AdminCategoriesView() {
   const active = (categories ?? []).filter((c) => c.isActive);
 
   function openNew() {
-    setForm({ name: "", color: "#2563eb", sortOrder: active.length + 1 });
+    setForm(emptyForm(active.length + 1));
     setModal("new");
   }
 
+  function onNameChange(name: string) {
+    setForm((prev: FormState) => ({
+      ...prev,
+      name,
+      imageUrl: prev.imageUrl || suggestCategoryImage(name) || prev.imageUrl,
+    }));
+  }
+
   function openEdit(c: Category) {
-    setForm({ name: c.name, color: c.color ?? "#2563eb", sortOrder: c.sortOrder });
+    setForm({
+      name: c.name,
+      description: c.description ?? "",
+      color: c.color ?? "#2563eb",
+      imageUrl: c.imageUrl ?? "",
+      mobileDisplay: c.mobileDisplay === "description" ? "description" : "image",
+      sortOrder: c.sortOrder,
+    });
     setModal(c);
+  }
+
+  function payloadFromForm() {
+    return {
+      name: form.name.trim(),
+      description: form.description.trim() || undefined,
+      color: form.color,
+      imageUrl: form.imageUrl.trim() || undefined,
+      mobileDisplay: form.mobileDisplay,
+      sortOrder: form.sortOrder,
+    };
   }
 
   async function save() {
     setSaving(true);
     const ok = await runAction(async () => {
+      const payload = payloadFromForm();
       if (modal === "new") {
-        await api.post("/v1/catalog/categories", { name: form.name, color: form.color, sortOrder: form.sortOrder });
+        await api.post("/v1/catalog/categories", payload);
       } else if (modal) {
-        await api.patch(`/v1/admin/categories/${modal.id}`, form);
+        await api.patch(`/v1/admin/categories/${modal.id}`, payload);
       }
       setModal(null);
       await reload();
@@ -75,7 +125,7 @@ export default function AdminCategoriesView() {
       <>
         <AdminPageHeader
           title="Categorías"
-          desc="Organizan el menú en POS, comanda y reportes."
+          desc="Organizan el menú en POS, comanda y reportes. Puedes elegir si la imagen se ve en el celular."
           actions={
             <>
               <ReloadButton onClick={reload} />
@@ -91,7 +141,9 @@ export default function AdminCategoriesView() {
             <table style={adminStyles.table}>
               <thead>
                 <tr>
+                  <th style={adminStyles.th}>Imagen</th>
                   <th style={adminStyles.th}>Nombre</th>
+                  <th style={adminStyles.th}>Imagen en móvil</th>
                   <th style={adminStyles.th}>Color</th>
                   <th style={adminStyles.th}>Orden</th>
                   <th style={adminStyles.th}>ID</th>
@@ -102,7 +154,24 @@ export default function AdminCategoriesView() {
               <tbody>
                 {active.map((c) => (
                   <tr key={c.id}>
-                    <td style={adminStyles.td}><strong>{c.name}</strong></td>
+                    <td style={adminStyles.td}>
+                      {c.imageUrl ? (
+                        <img src={c.imageUrl} alt="" title={categoryImageLabel(c.imageUrl) ?? ""} style={{ width: 44, height: 44, borderRadius: 8, objectFit: "cover", border: "1px solid var(--t-border)" }} />
+                      ) : (
+                        <span style={{ color: "var(--t-muted)", fontSize: 12 }}>—</span>
+                      )}
+                    </td>
+                    <td style={adminStyles.td}>
+                      <strong>{c.name}</strong>
+                      {c.description && (
+                        <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 4, maxWidth: 220 }}>
+                          {c.description.length > 80 ? `${c.description.slice(0, 80)}…` : c.description}
+                        </div>
+                      )}
+                    </td>
+                    <td style={adminStyles.td}>
+                      {c.mobileDisplay === "description" ? "No" : "Sí"}
+                    </td>
                     <td style={adminStyles.td}>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <span style={{ width: 14, height: 14, borderRadius: 4, background: c.color ?? "#cbd5e1", border: "1px solid var(--t-border)" }} />
@@ -130,7 +199,43 @@ export default function AdminCategoriesView() {
             footer={<ModalFooter onCancel={() => setModal(null)} onSave={save} saving={saving} disabled={!form.name.trim()} />}
           >
             <Field label="Nombre">
-              <input style={adminStyles.input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              <input style={adminStyles.input} value={form.name} onChange={(e) => onNameChange(e.target.value)} />
+            </Field>
+            <Field label="Descripción (opcional, solo referencia interna)">
+              <textarea
+                style={{ ...adminStyles.input, minHeight: 72, resize: "vertical" }}
+                value={form.description}
+                onChange={(e) => setForm({ ...form, description: e.target.value })}
+                placeholder="Notas sobre la categoría (no se muestra en la comanda)"
+              />
+            </Field>
+            <Field label="Imagen de categoría">
+              <CategoryImagePicker
+                value={form.imageUrl}
+                onChange={(path) => setForm({ ...form, imageUrl: path })}
+              />
+            </Field>
+            <Field label="Imagen en móvil">
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="mobileDisplay"
+                    checked={form.mobileDisplay === "image"}
+                    onChange={() => setForm({ ...form, mobileDisplay: "image" })}
+                  />
+                  Mostrar imagen junto al nombre
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                  <input
+                    type="radio"
+                    name="mobileDisplay"
+                    checked={form.mobileDisplay === "description"}
+                    onChange={() => setForm({ ...form, mobileDisplay: "description" })}
+                  />
+                  Solo nombre (sin imagen)
+                </label>
+              </div>
             </Field>
             <Field label="Color">
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

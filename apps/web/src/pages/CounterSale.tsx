@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { api, setBranchId, formatCOP } from "../lib/api";
 import { printInvoiceReceipt, printKitchenVoidTicket } from "../lib/print";
 import { useBarcodeScanner } from "../lib/barcode";
+import CategoryPicker from "../components/CategoryPicker";
 import PaymentModal from "../components/PaymentModal";
 import { ui, useTheme } from "../lib/theme";
+import { formatPickupDisplay, formatPickupLabel } from "../lib/pickupCode";
 
 type Product = {
   id: string;
@@ -13,7 +15,14 @@ type Product = {
   category?: { id: string; name: string; color?: string };
 };
 
-type Category = { id: string; name: string; color?: string };
+type Category = {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string | null;
+  imageUrl?: string | null;
+  mobileDisplay?: "image" | "description" | string | null;
+};
 
 type PickupOrder = {
   ticketId: string;
@@ -75,6 +84,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   const [showPay, setShowPay] = useState(false);
   const [pickupName, setPickupName] = useState("");
   const [pickupPhone, setPickupPhone] = useState("");
+  const [pickupCode, setPickupCode] = useState("");
   const [savingPickup, setSavingPickup] = useState(false);
   const [deliveryName, setDeliveryName] = useState("");
   const [deliveryPhone, setDeliveryPhone] = useState("");
@@ -196,6 +206,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     if (!invoice) return;
     setPickupName(invoice.pickupName ?? "");
     setPickupPhone(invoice.pickupPhone ?? "");
+    setPickupCode(invoice.pickupCode ?? "");
     setDeliveryName(invoice.deliveryName ?? "");
     setDeliveryPhone(invoice.deliveryPhone ?? "");
     setDeliveryAddress(invoice.deliveryAddress ?? "");
@@ -412,10 +423,20 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       const res = await api.patch(`/v1/pos/invoices/${invoice.id}/pickup`, {
         pickupName: pickupName || undefined,
         pickupPhone: pickupPhone || undefined,
+        pickupCode: pickupCode.trim() || undefined,
       });
       setInvoice((prev: any) => ({ ...prev, ...res.data }));
+      setPickupCode(res.data.pickupCode ?? pickupCode);
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "No se pudo guardar el localizador");
     } finally {
       setSavingPickup(false);
+    }
+  }
+
+  async function persistPickupIfNeeded() {
+    if (pickupPhone || pickupName || pickupCode.trim()) {
+      await savePickup();
     }
   }
 
@@ -442,13 +463,13 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     try {
       if (saleMode === "delivery") {
         await saveDelivery();
-      } else if (pickupPhone || pickupName) {
-        await savePickup();
+      } else {
+        await persistPickupIfNeeded();
       }
       const res = await api.post(`/v1/pos/invoices/${invoice.id}/send-to-kitchen`);
       setInvoice(res.data);
       refreshPickupQueue();
-      const code = res.data.pickupCode ? ` Pedido #${res.data.pickupCode}.` : "";
+      const code = res.data.pickupCode ? ` ${formatPickupLabel(res.data.pickupCode)}.` : "";
       if (saleMode === "delivery") {
         alert("Domicilio enviado a cocina.");
       } else if (pickupPhone) {
@@ -467,8 +488,8 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     if (!invoice) return;
     if (saleMode === "delivery") {
       await saveDelivery();
-    } else if (pickupPhone || pickupName) {
-      await savePickup();
+    } else {
+      await persistPickupIfNeeded();
     }
     const res = await api.post(`/v1/pos/invoices/${invoice.id}/pay`, data);
     const doc = res.data.fiscalDocument?.fullNumber ?? "simulado";
@@ -735,7 +756,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
                 background: "var(--t-card)", padding: "8px 10px", borderRadius: 8, fontSize: 13, color: "var(--t-fg)",
               }}>
                 <strong style={{ fontSize: 18, color: o.kitchenStatus === "ready" ? "#16a34a" : "#2563eb" }}>
-                  #{o.pickupCode ?? "—"}
+                  {formatPickupDisplay(o.pickupCode)}
                 </strong>
                 <div>
                   <div>{o.pickupName || "Cliente"} · {o.itemsSummary}</div>
@@ -803,7 +824,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       <p style={{ fontSize: 12, color: "var(--t-muted)", margin: "4px 0 12px" }}>
         {saleMode === "delivery"
           ? "Escanea productos y registra datos del domicilio antes de enviar a cocina o cobrar"
-          : "Escanea código de barras o toca un producto · Celular opcional para avisar cuando el pedido esté listo"}
+          : "Escanea o toca productos · Ingresa el número de localizador que entregas al cliente (opcional: celular para aviso)"}
       </p>
 
       <div className="yall-search-row">
@@ -829,28 +850,11 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
         )}
       </div>
 
-      <div className="yall-chip-row">
-        <button
-          onClick={() => setSelectedCategory("")}
-          style={{ padding: "6px 12px", borderRadius: 20, border: "none", background: !selectedCategory ? "var(--t-primary)" : "var(--t-chip-bg)", color: !selectedCategory ? "var(--t-primary-fg)" : "var(--t-chip-fg)", cursor: "pointer" }}
-        >
-          Todos
-        </button>
-        {categories.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelectedCategory(c.id)}
-            style={{
-              padding: "6px 12px", borderRadius: 20, border: "none",
-              background: selectedCategory === c.id ? (c.color ?? "#2563eb") : "var(--t-chip-bg)",
-              color: selectedCategory === c.id ? "#fff" : "var(--t-chip-fg)",
-              cursor: "pointer",
-            }}
-          >
-            {c.name}
-          </button>
-        ))}
-      </div>
+      <CategoryPicker
+        categories={categories}
+        selectedId={selectedCategory}
+        onSelect={setSelectedCategory}
+      />
 
       <div className="yall-pos-layout">
         <div className="yall-pos-products">
@@ -885,7 +889,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
               background: "var(--t-accent-soft)", color: "#60a5fa", border: "1px solid var(--t-accent-border)",
             }}>
               🍳 En cocina
-              {invoice.pickupCode ? ` · Pedido #${invoice.pickupCode}` : ""}
+              {invoice.pickupCode ? ` · ${formatPickupLabel(invoice.pickupCode)}` : ""}
               {pickupPhone ? " — avisaremos al cliente" : ""}
             </div>
           )}
@@ -1018,7 +1022,26 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
             </div>
           ) : (
             <div style={{ marginTop: 14, padding: 12, borderRadius: 10, background: "var(--t-card-alt)", border: "1px solid var(--t-border)" }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--t-fg)" }}>Cliente espera pedido</div>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: "var(--t-fg)" }}>
+                {saleMode === "counter" ? "Localizador del cliente" : "Cliente espera pedido"}
+              </div>
+              <label style={{ display: "grid", gap: 4, fontSize: 12, color: "var(--t-muted)", marginBottom: 8 }}>
+                Número de localizador
+                <input
+                  placeholder="Ej. 42 → 042"
+                  inputMode="numeric"
+                  value={pickupCode}
+                  onChange={(e) => setPickupCode(e.target.value.replace(/\D/g, "").slice(0, 3))}
+                  onBlur={savePickup}
+                  disabled={inKitchen && Boolean(invoice?.pickupCode)}
+                  style={{ ...ui.input, width: "100%", fontSize: 18, fontWeight: 700, letterSpacing: "0.08em" }}
+                />
+              </label>
+              {invoice?.pickupCode && (
+                <p style={{ fontSize: 12, color: "var(--t-accent-fg)", margin: "0 0 8px", fontWeight: 600 }}>
+                  {formatPickupLabel(invoice.pickupCode)} asignado
+                </p>
+              )}
               <input
                 placeholder="Nombre (opcional)"
                 value={pickupName}
@@ -1027,14 +1050,17 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
                 style={{ ...ui.input, width: "100%", marginBottom: 8 }}
               />
               <input
-                placeholder="Celular 3xx..."
+                placeholder="Celular 3xx... (opcional, aviso WhatsApp/SMS)"
                 value={pickupPhone}
                 onChange={(e) => setPickupPhone(e.target.value)}
                 onBlur={savePickup}
                 style={{ ...ui.input, width: "100%", boxSizing: "border-box" }}
               />
               <p style={{ fontSize: 11, color: "var(--t-muted)", margin: "8px 0 0" }}>
-                WhatsApp o SMS cuando cocina marque listo{savingPickup ? " · guardando…" : ""}
+                {saleMode === "counter"
+                  ? "Localizador físico: 1–999. Si no ingresas número, se asigna consecutivo de pedido desde 1000."
+                  : "WhatsApp o SMS cuando cocina marque listo. Sin localizador: consecutivo desde 1000."}
+                {savingPickup ? " · guardando…" : ""}
               </p>
             </div>
           )}

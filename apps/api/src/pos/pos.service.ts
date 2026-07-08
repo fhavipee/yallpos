@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { AddLineDto } from "./dto/add-line.dto";
@@ -8,6 +9,16 @@ import { PayInvoiceDto } from "./dto/pay-invoice.dto";
 import { KdsService } from "../kds/kds.service";
 import { FiscalService } from "../fiscal/fiscal.service";
 import { OrderNotifyService } from "../notifications/order-notify.service";
+import {
+  normalizePhysicalLocatorCode,
+  AUTO_ORDER_CODE_MAX,
+  AUTO_ORDER_CODE_START,
+  parsePickupCodeNumber,
+} from "./pickup-code.util";
+import {
+  releaseStalePickupLocatorsForCode,
+  sweepReleasedPickupLocators,
+} from "./pickup-locator.helper";
 import {
   buildPickupReadySmsLink,
   buildPickupReadyWhatsAppLink,
@@ -466,14 +477,106 @@ export class PosService {
       throw new BadRequestException("Invoice not editable");
     }
 
+    let pickupCode: string | null | undefined;
+    if (dto.pickupCode !== undefined) {
+      const trimmed = dto.pickupCode.trim();
+      if (!trimmed) {
+        pickupCode = null;
+      } else {
+        pickupCode = normalizePhysicalLocatorCode(trimmed);
+        await this.assertPickupCodeAvailable(branchId, pickupCode, invoiceId);
+      }
+    }
+
     return this.prisma.salesInvoice.update({
       where: { id: invoiceId },
       data: {
         pickupName: dto.pickupName ?? invoice.pickupName,
         pickupPhone: dto.pickupPhone ?? invoice.pickupPhone,
+        ...(pickupCode !== undefined ? { pickupCode } : {}),
       },
       include: { lines: { include: { modifiers: true } }, payments: true, fiscalDocuments: true },
     });
+  }
+
+  private async nextAutoOrderCode(branchId: string): Promise<string> {
+    await sweepReleasedPickupLocators(this.prisma, branchId);
+
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    const taken = await this.prisma.salesInvoice.findMany({
+      where: {
+        branchId,
+        serviceType: { in: ["counter", "takeaway"] },
+        pickupCode: { not: null },
+        pickupDeliveredAt: null,
+        voidedAt: null,
+        status: { in: ["draft", "sent_to_kitchen", "paid"] },
+        createdAt: { gte: start },
+      },
+      select: { pickupCode: true },
+    });
+
+    const usedAuto = new Set<number>();
+    for (const row of taken) {
+      const n = parsePickupCodeNumber(row.pickupCode);
+      if (n != null && n >= AUTO_ORDER_CODE_START) usedAuto.add(n);
+    }
+
+    for (let n = AUTO_ORDER_CODE_START; n <= AUTO_ORDER_CODE_MAX; n++) {
+      if (!usedAuto.has(n)) return String(n);
+    }
+    return String(AUTO_ORDER_CODE_START);
+  }
+
+  private activePickupInvoiceWhere(branchId: string): Prisma.SalesInvoiceWhereInput {
+    return {
+      branchId,
+      serviceType: { in: ["counter", "takeaway"] },
+      voidedAt: null,
+      pickupDeliveredAt: null,
+      lines: { some: {} },
+      OR: [
+        { status: "sent_to_kitchen" },
+        {
+          pickupCode: { not: null },
+          status: { in: ["draft", "sent_to_kitchen", "paid"] },
+        },
+      ],
+    };
+  }
+
+  private derivePickupKitchenStatus(
+    invoice: { status: string },
+    activeKdsItems: Array<{ status: string }>,
+  ): "new" | "preparing" | "ready" {
+    if (activeKdsItems.length > 0) {
+      const allReady = activeKdsItems.every((i) => i.status === "ready" || i.status === "served");
+      const preparing = activeKdsItems.some((i) => i.status === "preparing");
+      return allReady ? "ready" : preparing ? "preparing" : "new";
+    }
+    if (invoice.status === "paid") return "ready";
+    return "new";
+  }
+
+  private async assertPickupCodeAvailable(branchId: string, pickupCode: string, excludeInvoiceId: string) {
+    await releaseStalePickupLocatorsForCode(this.prisma, branchId, pickupCode, excludeInvoiceId);
+
+    const taken = await this.prisma.salesInvoice.findFirst({
+      where: {
+        branchId,
+        id: { not: excludeInvoiceId },
+        pickupCode,
+        voidedAt: null,
+        pickupDeliveredAt: null,
+        serviceType: { in: ["counter", "takeaway"] },
+        status: { in: ["draft", "sent_to_kitchen", "paid"] },
+      },
+      select: { id: true },
+    });
+    if (taken) {
+      throw new BadRequestException(`El localizador #${pickupCode} ya está en uso en un pedido activo`);
+    }
   }
 
   async getPickupNotifyStatus(branchId: string, invoiceId: string) {
@@ -490,8 +593,15 @@ export class PosService {
     if (!["counter", "takeaway"].includes(invoice.serviceType)) {
       throw new BadRequestException("Solo aplica a pedidos de mostrador o para llevar");
     }
+    if (invoice.pickupDeliveredAt) {
+      return { ok: true, invoiceId, updatedItems: 0, alreadyDelivered: true };
+    }
 
     const served = await this.kds.markInvoiceServed(branchId, invoiceId);
+    await this.prisma.salesInvoice.update({
+      where: { id: invoiceId },
+      data: { pickupDeliveredAt: new Date() },
+    });
     return {
       ok: true,
       invoiceId,
@@ -499,63 +609,44 @@ export class PosService {
     };
   }
 
-  private async nextPickupCode(branchId: string): Promise<string> {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const count = await this.prisma.salesInvoice.count({
-      where: {
-        branchId,
-        serviceType: { in: ["counter", "takeaway"] },
-        pickupCode: { not: null },
-        createdAt: { gte: start },
-      },
-    });
-    return String((count % 999) + 1).padStart(3, "0");
-  }
-
   async getPickupQueue(branchId: string) {
     const branch = await this.prisma.branch.findUnique({ where: { id: branchId } });
     const branchName = branch?.name ?? "Restaurante";
 
-    const tickets = await this.prisma.kdsTicket.findMany({
-      where: {
-        branchId,
-      },
-      include: { items: true },
+    const invoices = await this.prisma.salesInvoice.findMany({
+      where: this.activePickupInvoiceWhere(branchId),
+      include: { lines: true },
       orderBy: { createdAt: "asc" },
     });
+    if (invoices.length === 0) return [];
 
-    const invoiceIds = tickets.map((t) => t.invoiceId);
-    const invoices = await this.prisma.salesInvoice.findMany({
-      where: {
-        id: { in: invoiceIds },
-        branchId,
-        serviceType: { in: ["counter", "takeaway"] },
-      },
-      include: { lines: true },
+    const tickets = await this.prisma.kdsTicket.findMany({
+      where: { branchId, invoiceId: { in: invoices.map((inv) => inv.id) } },
+      include: { items: true },
     });
-    const invoiceMap = new Map(invoices.map((inv) => [inv.id, inv]));
+    const ticketByInvoice = new Map(tickets.map((ticket) => [ticket.invoiceId, ticket]));
 
     const queue: Record<string, unknown>[] = [];
-    for (const ticket of tickets) {
-      const invoice = invoiceMap.get(ticket.invoiceId);
-      if (!invoice) continue;
+    for (const invoice of invoices) {
+      const ticket = ticketByInvoice.get(invoice.id);
+      const active = (ticket?.items ?? []).filter((i) => i.status !== "canceled");
+      if (active.length > 0 && active.every((i) => i.status === "served")) continue;
 
-      const active = ticket.items.filter((i) => i.status !== "canceled");
-      if (active.length === 0 || active.every((i) => i.status === "served")) continue;
-
-      const allReady = active.every((i) => i.status === "ready" || i.status === "served");
-      const preparing = active.some((i) => i.status === "preparing");
-      const kitchenStatus = allReady ? "ready" : preparing ? "preparing" : "new";
-
-      const itemsSummary = active
-        .slice(0, 3)
-        .map((i) => invoice.lines.find((l) => l.id === i.invoiceLineId)?.nameSnapshot ?? "Producto")
-        .join(", ");
+      const kitchenStatus = this.derivePickupKitchenStatus(invoice, active);
+      const itemsSummary =
+        active.length > 0
+          ? active
+              .slice(0, 3)
+              .map((i) => invoice.lines.find((l) => l.id === i.invoiceLineId)?.nameSnapshot ?? "Producto")
+              .join(", ")
+          : invoice.lines
+              .slice(0, 3)
+              .map((line) => line.nameSnapshot)
+              .join(", ");
 
       queue.push({
-        ticketId: ticket.id,
-        invoiceId: ticket.invoiceId,
+        ticketId: ticket?.id ?? invoice.id,
+        invoiceId: invoice.id,
         pickupCode: invoice.pickupCode,
         pickupName: invoice.pickupName,
         pickupPhone: invoice.pickupPhone,
@@ -564,7 +655,7 @@ export class PosService {
         kitchenStatus,
         itemsSummary,
         pickupNotifiedAt: invoice.pickupNotifiedAt,
-        createdAt: ticket.createdAt,
+        createdAt: ticket?.createdAt ?? invoice.createdAt,
         whatsappLink: buildPickupReadyWhatsAppLink({
           pickupPhone: invoice.pickupPhone,
           customerName: invoice.pickupName,
@@ -616,6 +707,15 @@ export class PosService {
     });
     const waiterMap = new Map(waiters.map((w) => [w.id, w]));
 
+    const userIds = [...new Set(invoices.map((i) => i.waiterUserId).filter((id): id is string => !!id))];
+    const users = userIds.length
+      ? await this.prisma.user.findMany({
+          where: { id: { in: userIds } },
+          select: { id: true, name: true },
+        })
+      : [];
+    const userMap = new Map(users.map((u) => [u.id, u]));
+
     const rows = [];
     for (const invoice of invoices) {
       const table = invoice.tableSession?.table;
@@ -633,8 +733,10 @@ export class PosService {
         await this.orderNotify.tryNotifyTableOverdue(branchId, invoice.id, waitingMinutes);
       }
 
-      const waiter = invoice.waiterId ? waiterMap.get(invoice.waiterId) : undefined;
-      const waiterName = waiter?.name ?? "Mesero";
+      const staffWaiter = invoice.waiterId ? waiterMap.get(invoice.waiterId) : undefined;
+      const userWaiter = invoice.waiterUserId ? userMap.get(invoice.waiterUserId) : undefined;
+      const waiterName = staffWaiter?.name ?? userWaiter?.name ?? "Mesero";
+      const waiterPhone = staffWaiter?.phone ?? null;
       const hostWhatsAppLink = isOverdue
         && notificationSettings.tableReadyHostWhatsAppEnabled
         && notificationSettings.hostPhone
@@ -648,10 +750,10 @@ export class PosService {
             itemsSummary,
           })
         : null;
-      const waiterWhatsAppLink = notificationSettings.tableReadyWaiterWhatsAppEnabled && waiter?.phone
+      const waiterWhatsAppLink = notificationSettings.tableReadyWaiterWhatsAppEnabled && waiterPhone
         ? isOverdue
           ? buildTableOverdueWaiterWhatsAppLink({
-              waiterPhone: waiter.phone,
+              waiterPhone,
               branchName,
               tableLabel,
               waitingMinutes,
@@ -659,7 +761,7 @@ export class PosService {
               itemsSummary,
             })
           : buildTableReadyWaiterWhatsAppLink({
-              waiterPhone: waiter.phone,
+              waiterPhone,
               branchName,
               tableLabel,
               itemsSummary,
@@ -673,7 +775,9 @@ export class PosService {
         tableLabel,
         itemsSummary,
         total: invoice.total,
+        serviceType: invoice.serviceType,
         waiterId: invoice.waiterId,
+        waiterUserId: invoice.waiterUserId,
         waiterName,
         readyAt: invoice.tableReadyNotifiedAt,
         status: invoice.status,
@@ -948,7 +1052,7 @@ export class PosService {
     const alreadySent = invoice.status === "sent_to_kitchen";
     const needsCode =
       ["counter", "takeaway"].includes(invoice.serviceType) && !invoice.pickupCode;
-    const pickupCode = needsCode ? await this.nextPickupCode(branchId) : undefined;
+    const pickupCode = needsCode ? await this.nextAutoOrderCode(branchId) : undefined;
 
     const updated = await this.prisma.salesInvoice.update({
       where: { id: invoiceId },
@@ -1134,6 +1238,10 @@ export class PosService {
     const openSession = await this.prisma.posSession.findFirst({ where: { branchId, status: "open" } });
     if (!openSession) throw new BadRequestException("Debe abrir caja antes de cobrar");
 
+    const needsPickupCode =
+      ["counter", "takeaway"].includes(invoice.serviceType) && !invoice.pickupCode;
+    const pickupCode = needsPickupCode ? await this.nextAutoOrderCode(branchId) : undefined;
+
     let closedTableSession: { tableSessionId: string; tableId: string | null } | null = null;
 
     const paidInvoice = await this.prisma.$transaction(async (tx: any) => {
@@ -1154,6 +1262,7 @@ export class PosService {
           paidAt: new Date(),
           tipAmount: dto.tipAmount ?? 0,
           sessionId: invoice.sessionId ?? openSession.id,
+          ...(pickupCode ? { pickupCode } : {}),
         },
         include: { lines: { include: { modifiers: true } }, payments: true, fiscalDocuments: true },
       });

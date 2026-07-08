@@ -1,7 +1,14 @@
 import axios from "axios";
 import { clearAuth, getStoredAuth } from "./auth";
 
-const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3000" : "");
+export function getApiBaseUrl(): string {
+  if (import.meta.env.VITE_API_URL) return import.meta.env.VITE_API_URL;
+  if (!import.meta.env.DEV) return window.location.origin;
+  const host = typeof window !== "undefined" ? window.location.hostname : "localhost";
+  return `http://${host}:3000`;
+}
+
+const API_BASE = getApiBaseUrl();
 
 export const api = axios.create({
   baseURL: API_BASE,

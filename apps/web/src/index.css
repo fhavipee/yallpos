@@ -330,6 +330,54 @@ select option {
   touch-action: manipulation;
 }
 
+.yall-cat-chip {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.2;
+  background: var(--t-chip-bg);
+  color: var(--t-chip-fg);
+  font-family: inherit;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.yall-cat-chip[data-active="true"] {
+  background: var(--chip-accent, #2563eb);
+  color: #fff;
+}
+
+.yall-cat-chip-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.yall-cat-chip-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  display: block;
+}
+
+.yall-cat-chip-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
 .yall-search-row {
   display: flex;
   gap: 8px;

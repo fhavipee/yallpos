@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { KdsGateway } from "./kds.gateway";
 import { OrderNotifyService } from "../notifications/order-notify.service";
+import { releasePickupLocatorIfComplete } from "../pos/pickup-locator.helper";
 
 @Injectable()
 export class KdsService {
@@ -28,6 +29,19 @@ export class KdsService {
 
     if (items.length === 0) return [];
 
+    const invoiceIds = [...new Set(items.map((i) => i.ticket.invoiceId))];
+    const invoices = await this.prisma.salesInvoice.findMany({
+      where: { id: { in: invoiceIds }, branchId },
+      select: {
+        id: true,
+        serviceType: true,
+        pickupCode: true,
+        pickupName: true,
+        deliveryName: true,
+      },
+    });
+    const invoiceMap = new Map(invoices.map((inv) => [inv.id, inv]));
+
     const lineIds = items.map((i) => i.invoiceLineId);
     const lines = await this.prisma.salesInvoiceLine.findMany({ where: { id: { in: lineIds } } });
     const lineMap = new Map(lines.map((l) => [l.id, l]));
@@ -41,15 +55,20 @@ export class KdsService {
     return items.map((item) => {
       const line = lineMap.get(item.invoiceLineId);
       const table = item.ticket.tableId ? tableMap.get(item.ticket.tableId) : null;
+      const invoice = invoiceMap.get(item.ticket.invoiceId);
       const elapsedMin = Math.floor((Date.now() - item.createdAt.getTime()) / 60000);
       return {
         ...item,
+        ticketId: item.ticketId,
         invoiceId: item.ticket.invoiceId,
         productName: line?.nameSnapshot ?? "Producto",
-        qty: line?.qty ?? 1,
+        qty: Number(line?.qty ?? 1),
         lineNotes: line?.lineNotes,
         tableName: table?.name ?? null,
         areaName: table?.area?.name ?? null,
+        serviceType: invoice?.serviceType ?? null,
+        pickupCode: invoice?.pickupCode ?? null,
+        pickupName: invoice?.pickupName ?? invoice?.deliveryName ?? null,
         elapsedMin,
       };
     });
@@ -71,15 +90,85 @@ export class KdsService {
 
     let pickupNotify = null;
     let tableReady = null;
-    if (status === "ready") {
-      pickupNotify = await this.orderNotify.tryNotifyPickupReady(branchId, item.ticket.invoiceId);
+    if (status === "ready" || status === "served") {
+      if (status === "ready") {
+        pickupNotify = await this.orderNotify.tryNotifyPickupReady(branchId, item.ticket.invoiceId);
+      }
       tableReady = await this.orderNotify.tryNotifyTableReady(branchId, item.ticket.invoiceId);
       if (tableReady?.notified) {
         this.gateway.emitTableReady(branchId, tableReady);
       }
     }
 
+    if (status === "served") {
+      await releasePickupLocatorIfComplete(this.prisma, branchId, item.ticket.invoiceId);
+    }
+
     return { item, pickupNotify, tableReady };
+  }
+
+  private async updateInvoiceItemsStatus(
+    branchId: string,
+    invoiceId: string,
+    from: Array<"new" | "preparing" | "ready">,
+    to: "preparing" | "ready" | "served",
+  ) {
+    const ticket = await this.prisma.kdsTicket.findFirst({
+      where: { branchId, invoiceId },
+      include: { items: true },
+    });
+    if (!ticket) return { ok: false, updated: 0 };
+
+    const targets = ticket.items.filter((item) => from.includes(item.status as any));
+
+    const now = new Date();
+    for (const item of targets) {
+      await this.prisma.kdsItem.update({
+        where: { id: item.id },
+        data: {
+          status: to as any,
+          startedAt: to === "preparing" ? (item.startedAt ?? now) : item.startedAt ?? undefined,
+          readyAt: to === "ready" ? now : undefined,
+          servedAt: to === "served" ? now : undefined,
+        },
+      });
+      this.gateway.emitKdsItemUpdated(branchId, item.stationId, {
+        ...item,
+        status: to,
+        readyAt: to === "ready" ? now : item.readyAt,
+        servedAt: to === "served" ? now : item.servedAt,
+      });
+    }
+
+    let pickupNotify = null;
+    let tableReady = null;
+    if (to === "ready" || to === "served") {
+      if (to === "ready") {
+        pickupNotify = await this.orderNotify.tryNotifyPickupReady(branchId, invoiceId);
+      }
+      tableReady = await this.orderNotify.tryNotifyTableReady(branchId, invoiceId);
+      if (tableReady?.notified) {
+        this.gateway.emitTableReady(branchId, tableReady);
+      }
+    }
+
+    if (to === "served") {
+      await releasePickupLocatorIfComplete(this.prisma, branchId, invoiceId);
+    }
+
+    return { ok: true, updated: targets.length, pickupNotify, tableReady };
+  }
+
+  async markInvoicePreparing(branchId: string, invoiceId: string) {
+    return this.updateInvoiceItemsStatus(branchId, invoiceId, ["new"], "preparing");
+  }
+
+  async markInvoiceReady(branchId: string, invoiceId: string) {
+    return this.updateInvoiceItemsStatus(branchId, invoiceId, ["new", "preparing"], "ready");
+  }
+
+  async markInvoiceServedFromKds(branchId: string, invoiceId: string) {
+    return this.updateInvoiceItemsStatus(branchId, invoiceId, ["ready"], "served");
   }
 
   async markInvoiceServed(branchId: string, invoiceId: string) {
@@ -105,6 +194,8 @@ export class KdsService {
         servedAt,
       });
     }
+
+    await releasePickupLocatorIfComplete(this.prisma, branchId, invoiceId);
 
     return { ok: true, updated: pending.length };
   }

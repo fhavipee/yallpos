@@ -1,6 +1,7 @@
 import { io } from "socket.io-client";
+import { getApiBaseUrl } from "./api";
 
-const API_URL = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3000" : window.location.origin);
+const API_URL = getApiBaseUrl();
 
 export type TableUpdatedDetail = {
   tableId?: string;
@@ -14,9 +15,14 @@ export type TableReadyDetail = {
   tableSessionId?: string;
   tableId?: string | null;
   tableLabel?: string;
+  orderLabel?: string;
   itemsSummary?: string;
+  serviceType?: string;
   waiterId?: string | null;
+  waiterUserId?: string | null;
+  waiterName?: string | null;
   waiterWhatsAppLink?: string | null;
+  actionHint?: "serve" | "pickup";
 };
 
 export type TableServedDetail = {

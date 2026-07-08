@@ -185,7 +185,7 @@ export default function App() {
   const fg = "var(--t-fg)";
 
   if (branchId && standaloneView === "pickup-board") {
-    return <PickupBoard branchId={branchId} />;
+    return <PickupBoard branchId={branchId} kiosk />;
   }
 
   if (user && shouldUseWaiterKiosk(user) && !branchId) {

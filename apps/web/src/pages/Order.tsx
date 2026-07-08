@@ -3,6 +3,8 @@ import { api, formatApiError, setBranchId, formatCOP } from "../lib/api";
 import { canVoidInvoice, getStoredAuth } from "../lib/auth";
 import { printInvoiceReceipt, printKitchenTicket, printKitchenVoidTicket } from "../lib/print";
 import { dispatchTableUpdated, TABLE_READY_EVENT, TABLE_SERVED_EVENT, type TableReadyDetail, type TableServedDetail } from "../lib/kdsSocket";
+import { matchesOrderWaiter, orderReadyActionLabel, playKitchenReadyTone } from "../lib/kitchenReady";
+import CategoryPicker from "../components/CategoryPicker";
 import PaymentModal from "../components/PaymentModal";
 import { useBarcodeScanner } from "../lib/barcode";
 import { useTheme } from "../lib/theme";
@@ -18,7 +20,14 @@ type Product = {
   variants: { id: string; name: string; price: string }[];
 };
 
-type Category = { id: string; name: string; color?: string };
+type Category = {
+  id: string;
+  name: string;
+  color?: string;
+  description?: string | null;
+  imageUrl?: string | null;
+  mobileDisplay?: "image" | "description" | string | null;
+};
 
 export default function Order({
   branchId,
@@ -73,6 +82,10 @@ export default function Order({
 
   function syncKitchenReadyAlert(inv: any) {
     if (inv?.tableReadyNotifiedAt && !inv?.tableReadyServedAt) {
+      if (!matchesOrderWaiter({ waiterId: inv.waiterId, waiterUserId: inv.waiterUserId }, activeWaiter)) {
+        setKitchenReadyAlert(null);
+        return;
+      }
       const table = inv.tableSession?.table;
       const label = table
         ? `${table.area?.name ?? ""} · Mesa ${table.name}`.trim()
@@ -82,13 +95,18 @@ export default function Order({
         tableSessionId: inv.tableSessionId,
         tableId: inv.tableId,
         tableLabel: label,
+        orderLabel: label,
+        serviceType: inv.serviceType,
+        waiterId: inv.waiterId,
+        waiterUserId: inv.waiterUserId,
         itemsSummary: inv.lines?.slice(0, 3).map((l: any) => l.nameSnapshot).join(", "),
+        actionHint: inv.serviceType === "dine_in" ? "serve" : "pickup",
       };
       setKitchenReadyAlert(base);
       api.get("/v1/pos/table-ready-queue").then((res) => {
         const row = res.data.find((r: any) => r.invoiceId === inv.id);
         if (row?.waiterWhatsAppLink) {
-          setKitchenReadyAlert((cur) => (cur?.invoiceId === inv.id
+          setKitchenReadyAlert((cur) => (cur && cur.invoiceId === inv.id
             ? { ...cur, waiterWhatsAppLink: row.waiterWhatsAppLink }
             : cur));
         }
@@ -151,10 +169,12 @@ export default function Order({
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<TableReadyDetail>).detail;
       if (!detail) return;
+      if (!matchesOrderWaiter(detail, activeWaiter)) return;
       const matchesSession = detail.tableSessionId === tableSessionId;
       const matchesInvoice = detail.invoiceId && openInvoices.some((i) => i.id === detail.invoiceId);
       if (matchesSession || matchesInvoice) {
         setKitchenReadyAlert(detail);
+        playKitchenReadyTone();
         if (detail.invoiceId && !detail.waiterWhatsAppLink) {
           api.get("/v1/pos/table-ready-queue").then((res) => {
             const row = res.data.find((r: any) => r.invoiceId === detail.invoiceId);
@@ -169,7 +189,7 @@ export default function Order({
     };
     window.addEventListener(TABLE_READY_EVENT, handler);
     return () => window.removeEventListener(TABLE_READY_EVENT, handler);
-  }, [tableSessionId, openInvoices]);
+  }, [tableSessionId, openInvoices, activeWaiter?.id, activeWaiter?.kind]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -522,8 +542,11 @@ export default function Order({
           flexWrap: "wrap",
         }}>
           <span>
-            🟢 Cocina lista — {kitchenReadyAlert.tableLabel ?? tableLabel ?? "Mesa"}
+            🟢 Cocina lista — {kitchenReadyAlert.orderLabel ?? kitchenReadyAlert.tableLabel ?? tableLabel ?? "Mesa"}
             {kitchenReadyAlert.itemsSummary ? ` · ${kitchenReadyAlert.itemsSummary}` : ""}
+            <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4 }}>
+              {orderReadyActionLabel(kitchenReadyAlert)}
+            </span>
           </span>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {kitchenReadyAlert.waiterWhatsAppLink && (
@@ -657,14 +680,11 @@ export default function Order({
             </div>
           )}
 
-          <div className="yall-chip-row">
-            <CatBtn active={!selectedCat} onClick={() => setSelectedCat("")} color="#2563eb">Todos</CatBtn>
-            {categories.map((c) => (
-              <CatBtn key={c.id} active={selectedCat === c.id} onClick={() => setSelectedCat(c.id)} color={c.color ?? "#64748b"}>
-                {c.name}
-              </CatBtn>
-            ))}
-          </div>
+          <CategoryPicker
+            categories={categories}
+            selectedId={selectedCat}
+            onSelect={setSelectedCat}
+          />
 
           <div className="yall-pos-products">
             {filtered.map((p) => {
@@ -842,20 +862,6 @@ export default function Order({
         </div>
       </div>
     </div>
-  );
-}
-
-function CatBtn({ active, onClick, color, children }: { active: boolean; onClick: () => void; color: string; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: "6px 14px", borderRadius: 20, border: "none", cursor: "pointer", fontSize: 13,
-        background: active ? color : "var(--t-chip-bg)", color: active ? "#fff" : "var(--t-chip-fg)",
-      }}
-    >
-      {children}
-    </button>
   );
 }
 

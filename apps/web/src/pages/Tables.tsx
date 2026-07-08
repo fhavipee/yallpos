@@ -3,6 +3,7 @@ import { api, setBranchId, formatCOP } from "../lib/api";
 import { printSeatingSlip as printSeatingSlipTicket } from "../lib/print";
 import { notifyOverdueTables, type OverdueTableRow } from "../lib/tableServiceReport";
 import { TABLE_UPDATED_EVENT, TABLE_READY_EVENT, TABLE_SERVED_EVENT, dispatchTableUpdated, type TableUpdatedDetail, type TableReadyDetail, type TableServedDetail } from "../lib/kdsSocket";
+import { matchesOrderWaiter, orderReadyActionLabel } from "../lib/kitchenReady";
 import type { WaiterIdentity } from "../lib/pin";
 import { toWaiterApiBody } from "../lib/waiterAttribution";
 
@@ -234,7 +235,8 @@ export default function Tables({
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<TableReadyDetail>).detail;
-      if (!detail?.tableLabel) return;
+      if (!detail?.tableLabel && !detail?.orderLabel) return;
+      if (!matchesOrderWaiter(detail, activeWaiter)) return;
       setReadyTableAlert(detail);
       window.setTimeout(() => setReadyTableAlert(null), 15000);
       refresh();
@@ -244,14 +246,15 @@ export default function Tables({
       }
       if (tableReadySound) playTableReadyTone();
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        new Notification("Mesa lista en cocina", {
-          body: `${detail.tableLabel}${detail.itemsSummary ? ` · ${detail.itemsSummary}` : ""}`,
+        const label = detail.orderLabel ?? detail.tableLabel ?? "Pedido";
+        new Notification("Pedido listo en cocina", {
+          body: `${label}${detail.itemsSummary ? ` · ${detail.itemsSummary}` : ""}`,
         });
       }
     };
     window.addEventListener(TABLE_READY_EVENT, handler);
     return () => window.removeEventListener(TABLE_READY_EVENT, handler);
-  }, [tableReadySound, refresh]);
+  }, [tableReadySound, refresh, activeWaiter?.id, activeWaiter?.kind]);
 
   useEffect(() => {
     if (!active || readyQueue.length === 0) {
@@ -582,8 +585,11 @@ export default function Tables({
           flexWrap: "wrap",
         }}>
           <span>
-            🟢 Mesa lista — {readyTableAlert.tableLabel}
+            🟢 Cocina lista — {readyTableAlert.orderLabel ?? readyTableAlert.tableLabel}
             {readyTableAlert.itemsSummary ? ` · ${readyTableAlert.itemsSummary}` : ""}
+            <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4 }}>
+              {orderReadyActionLabel(readyTableAlert)}
+            </span>
           </span>
           <div style={{ display: "flex", gap: 8 }}>
             {readyTableAlert.tableSessionId && (

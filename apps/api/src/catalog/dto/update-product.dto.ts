@@ -6,7 +6,19 @@ export class CreateCategoryDto {
 
   @IsOptional()
   @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsString()
   color?: string;
+
+  @IsOptional()
+  @IsString()
+  imageUrl?: string;
+
+  @IsOptional()
+  @IsIn(["image", "description"])
+  mobileDisplay?: "image" | "description";
 
   @IsOptional()
   @IsNumber()

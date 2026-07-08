@@ -23,4 +23,19 @@ export class KdsController {
   updateStatus(@BranchId() branchId: string, @Param("id") id: string, @Param("status") status: any) {
     return this.service.updateItemStatus(branchId, id, status);
   }
+
+  @Post("invoices/:invoiceId/mark-preparing")
+  markInvoicePreparing(@BranchId() branchId: string, @Param("invoiceId") invoiceId: string) {
+    return this.service.markInvoicePreparing(branchId, invoiceId);
+  }
+
+  @Post("invoices/:invoiceId/mark-ready")
+  markInvoiceReady(@BranchId() branchId: string, @Param("invoiceId") invoiceId: string) {
+    return this.service.markInvoiceReady(branchId, invoiceId);
+  }
+
+  @Post("invoices/:invoiceId/mark-served")
+  markInvoiceServed(@BranchId() branchId: string, @Param("invoiceId") invoiceId: string) {
+    return this.service.markInvoiceServedFromKds(branchId, invoiceId);
+  }
 }

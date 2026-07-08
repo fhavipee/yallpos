@@ -192,8 +192,13 @@ export class OrderNotifyService {
     if (activeItems.length === 0) {
       return { notified: false, reason: "no_kds_items" };
     }
-    if (!activeItems.every((i) => i.status === "ready")) {
+    const stillCooking = activeItems.some((i) => i.status === "new" || i.status === "preparing");
+    if (stillCooking) {
       return { notified: false, reason: "not_all_ready" };
+    }
+    const hasReady = activeItems.some((i) => i.status === "ready");
+    if (!hasReady) {
+      return { notified: false, reason: "nothing_ready" };
     }
 
     const table = invoice.tableSession?.table;
@@ -203,19 +208,43 @@ export class OrderNotifyService {
     const itemsSummary = this.buildItemsSummary(invoice.lines);
 
     let waiterWhatsAppLink: string | null = null;
+    let waiterName: string | null = null;
     const settings = await readBranchNotificationSettings(this.prisma, branchId);
-    if (settings?.tableReadyWaiterWhatsAppEnabled && invoice.waiterId) {
-      const waiter = await this.prisma.staff.findFirst({
-        where: { id: invoice.waiterId, branchId },
-        select: { phone: true },
-      });
+    if (settings?.tableReadyWaiterWhatsAppEnabled) {
+      let waiterPhone: string | null = null;
+      if (invoice.waiterId) {
+        const waiter = await this.prisma.staff.findFirst({
+          where: { id: invoice.waiterId, branchId },
+          select: { name: true, phone: true },
+        });
+        waiterName = waiter?.name ?? null;
+        waiterPhone = waiter?.phone ?? null;
+      } else if (invoice.waiterUserId) {
+        const user = await this.prisma.user.findFirst({
+          where: { id: invoice.waiterUserId },
+          select: { name: true },
+        });
+        waiterName = user?.name ?? null;
+      }
       const branch = await this.prisma.branch.findUnique({ where: { id: branchId } });
       waiterWhatsAppLink = buildTableReadyWaiterWhatsAppLink({
-        waiterPhone: waiter?.phone,
+        waiterPhone,
         branchName: branch?.name ?? "Restaurante",
         tableLabel,
         itemsSummary,
       });
+    } else if (invoice.waiterId) {
+      const waiter = await this.prisma.staff.findFirst({
+        where: { id: invoice.waiterId, branchId },
+        select: { name: true },
+      });
+      waiterName = waiter?.name ?? null;
+    } else if (invoice.waiterUserId) {
+      const user = await this.prisma.user.findFirst({
+        where: { id: invoice.waiterUserId },
+        select: { name: true },
+      });
+      waiterName = user?.name ?? null;
     }
 
     await this.prisma.salesInvoice.update({
@@ -226,12 +255,17 @@ export class OrderNotifyService {
     return {
       notified: true,
       invoiceId,
+      serviceType: invoice.serviceType,
       tableSessionId: invoice.tableSessionId,
       tableId: invoice.tableId,
       tableLabel,
+      orderLabel: tableLabel,
       itemsSummary,
       waiterId: invoice.waiterId,
+      waiterUserId: invoice.waiterUserId,
+      waiterName,
       waiterWhatsAppLink,
+      actionHint: "serve" as const,
     };
   }
 

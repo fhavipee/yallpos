@@ -35,7 +35,10 @@ export class CatalogService {
       data: {
         branchId,
         name: dto.name,
+        description: dto.description?.trim() || null,
         color: dto.color ?? null,
+        imageUrl: dto.imageUrl?.trim() || null,
+        mobileDisplay: dto.mobileDisplay ?? "image",
         sortOrder: dto.sortOrder ?? (maxOrder._max.sortOrder ?? 0) + 1,
       },
     });

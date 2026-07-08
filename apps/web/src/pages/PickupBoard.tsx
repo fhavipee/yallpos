@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, setBranchId } from "../lib/api";
+import { formatPickupDisplay, formatPickupLabel, formatPickupSpeech, isAutoOrderCode, isPhysicalLocator } from "../lib/pickupCode";
 
 type PickupOrder = {
   ticketId: string;
@@ -17,12 +18,19 @@ type DeliveredEntry = {
   pickupName?: string;
 };
 
-export default function PickupBoard({ branchId }: { branchId: string }) {
+export default function PickupBoard({ branchId, kiosk = false }: { branchId: string; kiosk?: boolean }) {
   const params = new URLSearchParams(window.location.search);
-  const readyLimit = clampParam(params.get("ready"), 1, 12, 8);
-  const preparingLimit = clampParam(params.get("preparing"), 1, 12, 8);
-  const deliveredLimit = clampParam(params.get("delivered"), 1, 12, 6);
-  const announceMs = clampParam(params.get("announceMs"), 1000, 15000, 4000);
+  const readyLimit = kiosk ? clampParam(params.get("ready"), 1, 12, 8) : 12;
+  const preparingLimit = kiosk ? clampParam(params.get("preparing"), 1, 12, 8) : 12;
+  const deliveredLimit = kiosk ? clampParam(params.get("delivered"), 1, 12, 6) : 6;
+  const announceMs = kiosk ? clampParam(params.get("announceMs"), 1000, 15000, 4000) : 4000;
+  const announceNameDefault = params.get("announceName") !== "0";
+  const [announceName, setAnnounceName] = useState(() => {
+    const stored = localStorage.getItem("pickupAnnounceName");
+    if (stored === "0") return false;
+    if (stored === "1") return true;
+    return announceNameDefault;
+  });
   const [orders, setOrders] = useState<PickupOrder[]>([]);
   const [now, setNow] = useState(new Date());
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
@@ -31,6 +39,10 @@ export default function PickupBoard({ branchId }: { branchId: string }) {
   const seenReadyRef = useRef<Set<string>>(new Set());
   const readySnapshotRef = useRef<Map<string, DeliveredEntry>>(new Map());
   const hydratedReadyRef = useRef(false);
+
+  useEffect(() => {
+    localStorage.setItem("pickupAnnounceName", announceName ? "1" : "0");
+  }, [announceName]);
 
   async function load() {
     try {
@@ -58,7 +70,7 @@ export default function PickupBoard({ branchId }: { branchId: string }) {
         if (hasNewReady) {
           setAnnounceActive(true);
           playReadyTone();
-          announceReadyOrders(newReadyOrders);
+          announceReadyOrders(newReadyOrders, announceName);
           window.setTimeout(() => setAnnounceActive(false), announceMs);
         }
 
@@ -118,6 +130,14 @@ export default function PickupBoard({ branchId }: { branchId: string }) {
     () => orders.filter((o) => o.kitchenStatus !== "ready").slice(0, preparingLimit),
     [orders, preparingLimit],
   );
+  const newOrders = useMemo(
+    () => preparingOrders.filter((o) => o.kitchenStatus === "new"),
+    [preparingOrders],
+  );
+  const inProgressOrders = useMemo(
+    () => preparingOrders.filter((o) => o.kitchenStatus === "preparing"),
+    [preparingOrders],
+  );
 
   return (
     <div
@@ -153,13 +173,35 @@ export default function PickupBoard({ branchId }: { branchId: string }) {
           <div style={{ fontSize: 16, color: "var(--t-muted)", marginTop: 6 }}>
             Consulta tu numero y acercate al mostrador cuando aparezca en verde.
           </div>
-          <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 8 }}>
-            Config URL: <code>?view=pickup-board&amp;ready={readyLimit}&amp;preparing={preparingLimit}&amp;delivered={deliveredLimit}&amp;announceMs={announceMs}</code>
-          </div>
+          {kiosk && (
+            <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 8 }}>
+              Config URL: <code>?view=pickup-board&amp;ready={readyLimit}&amp;preparing={preparingLimit}&amp;delivered={deliveredLimit}&amp;announceMs={announceMs}&amp;announceName={announceName ? 1 : 0}</code>
+            </div>
+          )}
+          {!kiosk && orders.length > 0 && (
+            <div style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 8 }}>
+              {readyOrders.length} listo(s) · {preparingOrders.length} en preparación
+            </div>
+          )}
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ fontSize: 28, fontWeight: 800 }}>{now.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => setAnnounceName((v) => !v)}
+              title="Incluir el nombre del cliente en el aviso por voz"
+              style={{
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: `1px solid ${announceName ? "#22c55e" : "#334155"}`,
+                background: announceName ? "#14532d" : "#1e293b",
+                color: announceName ? "#bbf7d0" : "#e2e8f0",
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              {announceName ? "🔊 Nombre + número" : "🔇 Solo número"}
+            </button>
             <button
               onClick={load}
               style={{
@@ -192,7 +234,7 @@ export default function PickupBoard({ branchId }: { branchId: string }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 18 }}>
         <div style={{ display: "grid", gap: 18 }}>
-        <Section title="Listos para retirar" subtitle="Acercate al mostrador" accent="#22c55e">
+        <Section title={`Listos para retirar${readyOrders.length ? ` (${readyOrders.length})` : ""}`} subtitle="Acercate al mostrador" accent="#22c55e">
           {readyOrders.length === 0 ? (
             <EmptyState text="Aun no hay pedidos listos." />
           ) : (
@@ -228,7 +270,11 @@ export default function PickupBoard({ branchId }: { branchId: string }) {
         </Section>
         </div>
 
-        <Section title="Preparando" subtitle="Tu pedido esta en cocina" accent="#3b82f6">
+        <Section
+          title={`Preparando${preparingOrders.length ? ` (${preparingOrders.length})` : ""}`}
+          subtitle={newOrders.length && inProgressOrders.length ? `${newOrders.length} en cola · ${inProgressOrders.length} preparando` : "Tu pedido esta en cocina"}
+          accent="#3b82f6"
+        >
           {preparingOrders.length === 0 ? (
             <EmptyState text="Sin pedidos en preparacion." />
           ) : (
@@ -277,7 +323,7 @@ function playReadyTone() {
   }
 }
 
-function announceReadyOrders(orders: PickupOrder[]) {
+function announceReadyOrders(orders: PickupOrder[], announceName: boolean) {
   try {
     if (!("speechSynthesis" in window) || orders.length === 0) return;
     window.speechSynthesis.cancel();
@@ -289,10 +335,7 @@ function announceReadyOrders(orders: PickupOrder[]) {
       null;
 
     for (const order of orders.slice(0, 2)) {
-      const code = formatPickupCode(order.pickupCode);
-      const utterance = new SpeechSynthesisUtterance(
-        `Pedido ${code}, acercarse al mostrador.`,
-      );
+      const utterance = new SpeechSynthesisUtterance(buildAnnounceText(order, announceName));
       utterance.lang = esVoice?.lang ?? "es-CO";
       utterance.rate = 0.95;
       utterance.pitch = 1;
@@ -304,9 +347,23 @@ function announceReadyOrders(orders: PickupOrder[]) {
   }
 }
 
+function buildAnnounceText(order: PickupOrder, announceName: boolean): string {
+  const code = formatPickupSpeech(order.pickupCode);
+  const prefix = isAutoOrderCode(order.pickupCode) ? "Pedido" : "Localizador";
+  const name = order.pickupName?.trim();
+  const hasName = announceName && Boolean(name) && name!.toLowerCase() !== "cliente";
+
+  if (hasName && order.pickupCode) {
+    return `${prefix} ${code}, ${name}, acercarse al mostrador.`;
+  }
+  if (hasName) {
+    return `${name}, acercarse al mostrador.`;
+  }
+  return `${prefix} ${code}, acercarse al mostrador.`;
+}
+
 function formatPickupCode(code?: string) {
-  if (!code) return "sin numero";
-  return code.split("").join(" ");
+  return formatPickupSpeech(code);
 }
 
 function clampParam(value: string | null, min: number, max: number, fallback: number) {
@@ -372,7 +429,7 @@ function BigTicket({
     >
       <div style={{ fontSize: 18, fontWeight: 700 }}>{label}</div>
       <div style={{ fontSize: 76, fontWeight: 900, lineHeight: 1, letterSpacing: 2 }}>
-        #{code ?? "---"}
+        {formatPickupDisplay(code)}
       </div>
       <div style={{ fontSize: 16, fontWeight: 600 }}>{detail}</div>
     </div>
@@ -403,7 +460,7 @@ function SmallTicket({
       }}
     >
       <div style={{ fontSize: 34, fontWeight: 900, color: "#fff", minWidth: 96 }}>
-        #{code ?? "---"}
+        {formatPickupDisplay(code)}
       </div>
       <div>
         <div style={{ fontSize: 18, fontWeight: 700, color: "#fff" }}>{label}</div>
@@ -436,7 +493,7 @@ function DeliveredTicket({ code, label }: { code?: string; label: string }) {
       }}
     >
       <div style={{ fontSize: 34, fontWeight: 900, color: "#e2e8f0", lineHeight: 1.1 }}>
-        #{code ?? "---"}
+        {formatPickupDisplay(code)}
       </div>
       <div style={{ fontSize: 13, color: "#cbd5e1", marginTop: 8 }}>{label}</div>
       <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 4 }}>Entregado</div>

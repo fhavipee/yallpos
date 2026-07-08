@@ -1,18 +1,35 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, setBranchId } from "../lib/api";
 import { createKdsSocket } from "../lib/kdsSocket";
+import { formatPickupDisplay, formatPickupLabel, isAutoOrderCode, isPhysicalLocator } from "../lib/pickupCode";
 
 type KdsItem = {
   id: string;
   status: string;
+  ticketId: string;
   invoiceId: string;
   productName: string;
   qty: number;
   lineNotes?: string;
-  tableName?: string;
-  areaName?: string;
+  tableName?: string | null;
+  areaName?: string | null;
+  serviceType?: string | null;
+  pickupCode?: string | null;
+  pickupName?: string | null;
   elapsedMin: number;
   course?: string;
+};
+
+type OrderGroup = {
+  key: string;
+  invoiceId: string;
+  ticketId: string;
+  label: string;
+  subtitle?: string;
+  pickupCode?: string | null;
+  isCounter: boolean;
+  elapsedMin: number;
+  items: KdsItem[];
 };
 
 const STATUS_COL: Record<string, string> = {
@@ -27,6 +44,7 @@ export default function Kds({ branchId }: { branchId: string }) {
   const [items, setItems] = useState<KdsItem[]>([]);
   const [clock, setClock] = useState(new Date());
   const [voidAlert, setVoidAlert] = useState<{ label: string; reason?: string | null } | null>(null);
+  const [busyOrderId, setBusyOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     setBranchId(branchId);
@@ -74,6 +92,33 @@ export default function Kds({ branchId }: { branchId: string }) {
     await load();
   }
 
+  async function setOrderStatus(group: OrderGroup, status: string) {
+    setBusyOrderId(group.invoiceId);
+    try {
+      let res;
+      if (status === "preparing") {
+        res = await api.post(`/v1/kds/invoices/${group.invoiceId}/mark-preparing`);
+      } else if (status === "ready") {
+        res = await api.post(`/v1/kds/invoices/${group.invoiceId}/mark-ready`);
+      } else if (status === "served") {
+        res = await api.post(`/v1/kds/invoices/${group.invoiceId}/mark-served`);
+      } else {
+        return;
+      }
+      const notify = res.data?.pickupNotify;
+      if (notify?.notified) {
+        if (notify.whatsappLink && confirm("Pedido listo. ¿Abrir WhatsApp para avisar al cliente?")) {
+          window.open(notify.whatsappLink, "_blank");
+        } else if (notify.smsLink && confirm("Pedido listo. ¿Abrir SMS para avisar al cliente?")) {
+          window.open(notify.smsLink, "_blank");
+        }
+      }
+      await load();
+    } finally {
+      setBusyOrderId(null);
+    }
+  }
+
   async function notifyCustomer(invoiceId: string) {
     const res = await api.post(`/v1/pos/invoices/${invoiceId}/pickup-notify`);
     const notify = res.data;
@@ -90,10 +135,15 @@ export default function Kds({ branchId }: { branchId: string }) {
   }
 
   const grouped = useMemo(() => ({
-    new: items.filter((i) => i.status === "new"),
-    preparing: items.filter((i) => i.status === "preparing"),
-    ready: items.filter((i) => i.status === "ready"),
+    new: groupItemsByOrder(items.filter((i) => i.status === "new")),
+    preparing: groupItemsByOrder(items.filter((i) => i.status === "preparing")),
+    ready: groupItemsByOrder(items.filter((i) => i.status === "ready")),
   }), [items]);
+
+  const orderCount = useMemo(
+    () => new Set(items.map((i) => i.invoiceId)).size,
+    [items],
+  );
 
   return (
     <div style={{ background: "#0f172a", color: "#e2e8f0", margin: -20, padding: 20, minHeight: "calc(100vh - 60px)" }}>
@@ -111,14 +161,14 @@ export default function Kds({ branchId }: { branchId: string }) {
           {voidAlert.reason ? ` · ${voidAlert.reason}` : ""}
         </div>
       )}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, gap: 12, flexWrap: "wrap" }}>
         <div>
           <h2 style={{ margin: 0, color: "#fff" }}>🍳 Cocina — Restaurante de Yall</h2>
           <div style={{ fontSize: 14, color: "var(--t-muted)" }}>
-            {clock.toLocaleTimeString("es-CO")} · {items.length} pedidos activos
+            {clock.toLocaleTimeString("es-CO")} · {orderCount} pedido(s) · {items.length} producto(s)
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {stations.map((s) => (
             <button
               key={s.id}
@@ -143,11 +193,18 @@ export default function Kds({ branchId }: { branchId: string }) {
               background: STATUS_COL[col], color: col === "new" ? "#000" : "#fff",
               textAlign: "center", textTransform: "uppercase", fontSize: 13,
             }}>
-              {col === "new" ? "Nuevo" : col === "preparing" ? "Preparando" : "Listo"} ({grouped[col].length})
+              {col === "new" ? "Nuevo" : col === "preparing" ? "Preparando" : "Listo"} ({grouped[col].length} pedidos)
             </div>
-            <div style={{ display: "grid", gap: 10 }}>
-              {grouped[col].map((item) => (
-                <KdsCard key={item.id} item={item} onStatus={setStatus} onNotify={notifyCustomer} />
+            <div style={{ display: "grid", gap: 12 }}>
+              {grouped[col].map((group) => (
+                <KdsOrderCard
+                  key={`${col}-${group.key}`}
+                  group={group}
+                  column={col}
+                  busy={busyOrderId === group.invoiceId}
+                  onOrderStatus={setOrderStatus}
+                  onNotify={notifyCustomer}
+                />
               ))}
               {grouped[col].length === 0 && (
                 <div style={{ textAlign: "center", color: "var(--t-muted)", padding: 20, fontSize: 13 }}>—</div>
@@ -160,52 +217,157 @@ export default function Kds({ branchId }: { branchId: string }) {
   );
 }
 
-function KdsCard({
-  item,
-  onStatus,
+function groupItemsByOrder(items: KdsItem[]): OrderGroup[] {
+  const map = new Map<string, OrderGroup>();
+
+  for (const item of items) {
+    const existing = map.get(item.invoiceId);
+    if (existing) {
+      existing.items.push(item);
+      existing.elapsedMin = Math.max(existing.elapsedMin, item.elapsedMin);
+      continue;
+    }
+
+    map.set(item.invoiceId, {
+      key: item.invoiceId,
+      invoiceId: item.invoiceId,
+      ticketId: item.ticketId,
+      label: buildOrderLabel(item),
+      subtitle: buildOrderSubtitle(item),
+      pickupCode: item.pickupCode,
+      isCounter: !item.tableName,
+      elapsedMin: item.elapsedMin,
+      items: [item],
+    });
+  }
+
+  return [...map.values()].sort((a, b) => a.elapsedMin - b.elapsedMin);
+}
+
+function buildOrderLabel(item: KdsItem) {
+  if (item.tableName) {
+    return `Mesa ${item.tableName}`;
+  }
+  if (item.pickupCode) {
+    return formatPickupLabel(item.pickupCode);
+  }
+  if (item.serviceType === "takeaway") return "Para llevar";
+  if (item.serviceType === "delivery") return "Domicilio";
+  return "Mostrador";
+}
+
+function buildOrderSubtitle(item: KdsItem) {
+  const parts: string[] = [];
+  if (item.pickupName) parts.push(item.pickupName);
+  if (item.areaName) parts.push(item.areaName);
+  if (item.tableName && item.pickupCode && isPhysicalLocator(item.pickupCode)) {
+    parts.push(formatPickupDisplay(item.pickupCode));
+  }
+  return parts.join(" · ") || undefined;
+}
+
+function KdsOrderCard({
+  group,
+  column,
+  busy,
+  onOrderStatus,
   onNotify,
 }: {
-  item: KdsItem;
-  onStatus: (id: string, s: string) => void;
+  group: OrderGroup;
+  column: "new" | "preparing" | "ready";
+  busy: boolean;
+  onOrderStatus: (group: OrderGroup, status: string) => void;
   onNotify: (invoiceId: string) => void;
 }) {
-  const urgent = item.elapsedMin >= 15;
-  const warning = item.elapsedMin >= 8;
+  const urgent = group.elapsedMin >= 15;
+  const warning = group.elapsedMin >= 8;
 
   return (
     <div style={{
-      background: "#1e293b", borderRadius: 12, padding: 14,
-      border: `2px solid ${urgent ? "#ef4444" : warning ? "#f59e0b" : "#334155"}`,
+      background: "#1e293b",
+      borderRadius: 14,
+      padding: 14,
+      border: `2px solid ${urgent ? "#ef4444" : warning ? "#f59e0b" : group.pickupCode ? "#2563eb" : "#334155"}`,
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontWeight: 800, fontSize: 16, color: "#fff" }}>
-          {item.tableName ? `Mesa ${item.tableName}` : "Mostrador"}
-        </span>
-        <span style={{
-          fontSize: 12, fontWeight: 700,
-          color: urgent ? "#ef4444" : warning ? "#fbbf24" : "#94a3b8",
-        }}>
-          {item.elapsedMin} min
-        </span>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 900, fontSize: 20, color: "#fff", lineHeight: 1.1 }}>
+            {group.label}
+          </div>
+          {group.subtitle && (
+            <div style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 4 }}>{group.subtitle}</div>
+          )}
+          <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 6 }}>
+            {group.items.length} producto(s) en esta etapa
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          {group.pickupCode && (
+            <div style={{
+              fontSize: isAutoOrderCode(group.pickupCode) ? 24 : 28,
+              fontWeight: 900,
+              color: isPhysicalLocator(group.pickupCode) ? "#60a5fa" : "#fbbf24",
+              lineHeight: 1,
+            }}>
+              {formatPickupDisplay(group.pickupCode)}
+            </div>
+          )}
+          <div style={{
+            fontSize: 12,
+            fontWeight: 700,
+            color: urgent ? "#ef4444" : warning ? "#fbbf24" : "#94a3b8",
+            marginTop: 4,
+          }}>
+            {group.elapsedMin} min
+          </div>
+        </div>
       </div>
-      {item.areaName && <div style={{ fontSize: 11, color: "var(--t-muted)", marginBottom: 6 }}>{item.areaName}</div>}
-      <div style={{ fontSize: 18, fontWeight: 700, color: "#f8fafc", marginBottom: 4 }}>
-        {item.qty > 1 ? `${item.qty}× ` : ""}{item.productName}
-      </div>
-      {item.lineNotes && <div style={{ fontSize: 12, color: "#fbbf24" }}>📝 {item.lineNotes}</div>}
 
-      <div style={{ display: "flex", gap: 6, marginTop: 12 }}>
-        {item.status === "new" && (
-          <ActionBtn color="#3b82f6" onClick={() => onStatus(item.id, "preparing")}>Preparar</ActionBtn>
-        )}
-        {item.status === "preparing" && (
-          <ActionBtn color="#22c55e" onClick={() => onStatus(item.id, "ready")}>Listo</ActionBtn>
-        )}
-        {item.status === "ready" && (
+      <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+        {group.items.map((item) => (
+          <div
+            key={item.id}
+            style={{
+              background: "#0f172a",
+              borderRadius: 10,
+              padding: "10px 12px",
+              border: "1px solid #334155",
+            }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#f8fafc" }}>
+              {item.qty > 1 ? `${item.qty}× ` : ""}{item.productName}
+            </div>
+            {item.lineNotes && <div style={{ fontSize: 12, color: "#fbbf24", marginTop: 4 }}>📝 {item.lineNotes}</div>}
+            {item.course && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>{item.course}</div>}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {column === "new" && (
           <>
-            <ActionBtn color="#64748b" onClick={() => onStatus(item.id, "served")}>Entregado</ActionBtn>
-            {!item.tableName && (
-              <ActionBtn color="#25D366" onClick={() => onNotify(item.invoiceId)}>Avisar</ActionBtn>
+            <ActionBtn color="#3b82f6" disabled={busy} onClick={() => onOrderStatus(group, "preparing")}>
+              {busy ? "…" : "Preparar pedido"}
+            </ActionBtn>
+            <ActionBtn color="#22c55e" disabled={busy} onClick={() => onOrderStatus(group, "ready")}>
+              {busy ? "…" : "Pedido listo"}
+            </ActionBtn>
+          </>
+        )}
+        {column === "preparing" && (
+          <ActionBtn color="#22c55e" disabled={busy} onClick={() => onOrderStatus(group, "ready")}>
+            {busy ? "…" : "Pedido listo"}
+          </ActionBtn>
+        )}
+        {column === "ready" && (
+          <>
+            <ActionBtn color="#64748b" disabled={busy} onClick={() => onOrderStatus(group, "served")}>
+              {busy ? "…" : "Entregar pedido"}
+            </ActionBtn>
+            {group.isCounter && (
+              <ActionBtn color="#25D366" disabled={busy} onClick={() => onNotify(group.invoiceId)}>
+                Avisar
+              </ActionBtn>
             )}
           </>
         )}
@@ -214,11 +376,34 @@ function KdsCard({
   );
 }
 
-function ActionBtn({ color, onClick, children }: { color: string; onClick: () => void; children: React.ReactNode }) {
+function ActionBtn({
+  color,
+  onClick,
+  disabled,
+  children,
+}: {
+  color: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <button
       onClick={onClick}
-      style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "none", background: color, color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 13 }}
+      disabled={disabled}
+      style={{
+        flex: 1,
+        minWidth: 120,
+        padding: "8px 0",
+        borderRadius: 8,
+        border: "none",
+        background: color,
+        color: "#fff",
+        fontWeight: 700,
+        cursor: disabled ? "wait" : "pointer",
+        fontSize: 13,
+        opacity: disabled ? 0.6 : 1,
+      }}
     >
       {children}
     </button>

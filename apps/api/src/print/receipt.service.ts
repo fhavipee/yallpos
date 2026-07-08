@@ -44,6 +44,29 @@ export class ReceiptService {
       ? `${table.area?.name ? `${table.area.name} · ` : ""}Mesa ${table.name}`
       : undefined;
 
+    const deliveryFee = invoice.serviceType === "delivery" ? Number(invoice.deliveryFee ?? 0) : 0;
+    let orderLabel: string | undefined;
+    let deliveryInfo: ReceiptData["deliveryInfo"];
+
+    if (invoice.serviceType === "delivery") {
+      orderLabel = `Domicilio · ${invoice.deliveryName ?? "Sin nombre"}`;
+      deliveryInfo = {
+        name: invoice.deliveryName ?? undefined,
+        phone: invoice.deliveryPhone ?? undefined,
+        address: invoice.deliveryAddress ?? undefined,
+        reference: invoice.deliveryReference ?? undefined,
+        fee: deliveryFee > 0 ? deliveryFee : undefined,
+      };
+    } else if (invoice.serviceType === "takeaway") {
+      const code = invoice.pickupCode ? ` #${invoice.pickupCode}` : "";
+      const name = invoice.pickupName ? ` · ${invoice.pickupName}` : "";
+      orderLabel = `Para llevar${code}${name}`;
+    } else if (invoice.serviceType === "counter") {
+      const code = invoice.pickupCode ? ` #${invoice.pickupCode}` : "";
+      const name = invoice.pickupName ? ` · ${invoice.pickupName}` : "";
+      orderLabel = `Mostrador${code}${name}`;
+    }
+
     const taxDefs = await this.taxes.ensureDefaults(company.id);
     const labelMap = this.taxes.buildLabelMap(taxDefs);
     const labelFor = (code: string, kind: "iva" | "consumption") =>
@@ -59,7 +82,10 @@ export class ReceiptService {
       cude: simulationMode ? undefined : fiscal?.cude ?? undefined,
       isContingency: fiscal?.status === "contingency",
       simulationMode,
+      serviceType: invoice.serviceType,
       tableLabel,
+      orderLabel,
+      deliveryInfo,
       waiterName,
       guestsCount: invoice.guestsCount ?? undefined,
       lines: invoice.lines.map((l) => ({
@@ -71,7 +97,7 @@ export class ReceiptService {
       tax: Number(invoice.tax),
       consumptionTax: Number(invoice.consumptionTax),
       taxBreakdown: aggregateTaxBreakdown(invoice.lines, labelFor),
-      total: Number(invoice.total) + Number(invoice.tipAmount),
+      total: Number(invoice.total) + Number(invoice.tipAmount) + deliveryFee,
       tip: Number(invoice.tipAmount) || undefined,
       payments: invoice.payments.map((p) => ({
         method: p.method,
@@ -120,7 +146,24 @@ export class ReceiptService {
   ${d.phone ? `<div class="center">Tel: ${d.phone}</div>` : ""}
   <hr>
   ${docHeader}
-  ${d.tableLabel ? `<div>Mesa: ${d.tableLabel}</div>` : ""}
+  ${
+    d.orderLabel
+      ? `<div>${d.serviceType === "dine_in" ? "Mesa" : "Pedido"}: ${d.orderLabel}</div>`
+      : d.tableLabel
+        ? `<div>Mesa: ${d.tableLabel}</div>`
+        : ""
+  }
+  ${
+    d.deliveryInfo
+      ? `<div style="margin-top:6px;padding:6px 0;border-top:1px dashed #000;border-bottom:1px dashed #000">
+          <strong>DOMICILIO</strong><br>
+          ${d.deliveryInfo.name ? `Cliente: ${d.deliveryInfo.name}<br>` : ""}
+          ${d.deliveryInfo.phone ? `Tel: ${d.deliveryInfo.phone}<br>` : ""}
+          ${d.deliveryInfo.address ? `Dir: ${d.deliveryInfo.address}<br>` : ""}
+          ${d.deliveryInfo.reference ? `Ref: ${d.deliveryInfo.reference}` : ""}
+        </div>`
+      : ""
+  }
   ${d.waiterName ? `<div>Mesero: ${d.waiterName}</div>` : ""}
   ${d.docNumber && !d.simulationMode ? `<div>No: ${d.docNumber}</div>` : ""}
   ${d.simulationMode && d.docNumber ? `<div>Ref: ${d.docNumber}</div>` : ""}
@@ -145,6 +188,7 @@ export class ReceiptService {
         }<div>IVA: $${d.tax.toLocaleString("es-CO")}</div>`
   }
   ${d.tip ? `<div>Propina: $${d.tip.toLocaleString("es-CO")}</div>` : ""}
+  ${d.deliveryInfo?.fee ? `<div>Domicilio: $${d.deliveryInfo.fee.toLocaleString("es-CO")}</div>` : ""}
   <div class="total">TOTAL: $${d.total.toLocaleString("es-CO")}</div>
   <hr>
   ${d.payments.map((p) => `<div>${p.method.toUpperCase()}: $${p.amount.toLocaleString("es-CO")}</div>`).join("")}

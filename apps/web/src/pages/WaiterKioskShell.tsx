@@ -1,10 +1,19 @@
 import { useEffect, useState } from "react";
-import { setBranchId } from "../lib/api";
+import { setBranchId, api } from "../lib/api";
 import { type AuthUser } from "../lib/auth";
 import { exitWaiterKiosk, isWaiterUser } from "../lib/waiterKiosk";
 import { useSwipeTabs } from "../lib/useSwipeTabs";
 import { verifyPin } from "../lib/pin";
 import { clearActiveWaiter, getActiveWaiter, setActiveWaiter } from "../lib/activeWaiter";
+import { createBranchSocket, TABLE_READY_EVENT, TABLE_SERVED_EVENT, type TableReadyDetail } from "../lib/kdsSocket";
+import {
+  matchesOrderWaiter,
+  notifyKitchenReadyBrowser,
+  orderReadyActionLabel,
+  playKitchenReadyTone,
+  queueRowToReadyDetail,
+  resolveWaiterIdentity,
+} from "../lib/kitchenReady";
 import PinPromptModal from "../components/PinPromptModal";
 import Tables from "./Tables";
 import Order from "./Order";
@@ -33,6 +42,110 @@ export default function WaiterKioskShell({
   const [pinAction, setPinAction] = useState<PinAction>(null);
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinBusy, setPinBusy] = useState(false);
+  const [kitchenAlerts, setKitchenAlerts] = useState<TableReadyDetail[]>([]);
+  const [markingServedId, setMarkingServedId] = useState<string | null>(null);
+  const waiterIdentity = resolveWaiterIdentity(activeWaiter, user);
+
+  useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
+  }, []);
+
+  function acceptReadyAlert(detail: TableReadyDetail, playSound = true) {
+    if (!detail.invoiceId) return;
+    if (!matchesOrderWaiter(detail, waiterIdentity)) return;
+    setKitchenAlerts((prev) => {
+      if (prev.some((a) => a.invoiceId === detail.invoiceId)) return prev;
+      return [detail, ...prev].slice(0, 8);
+    });
+    if (playSound) {
+      playKitchenReadyTone();
+      notifyKitchenReadyBrowser(detail);
+    }
+  }
+
+  useEffect(() => {
+    if (!branchId) return;
+    const socket = createBranchSocket(branchId);
+    socket.on("kds.table.ready", (payload: TableReadyDetail) => {
+      acceptReadyAlert(payload);
+    });
+    socket.on("kds.table.served", (payload: { invoiceId?: string }) => {
+      if (!payload?.invoiceId) return;
+      setKitchenAlerts((prev) => prev.filter((a) => a.invoiceId !== payload.invoiceId));
+    });
+    return () => { socket.disconnect(); };
+  }, [branchId, waiterIdentity?.id, waiterIdentity?.kind]);
+
+  useEffect(() => {
+    const onReady = (event: Event) => {
+      const detail = (event as CustomEvent<TableReadyDetail>).detail;
+      if (!detail?.invoiceId) return;
+      acceptReadyAlert(detail);
+    };
+    const onServed = (event: Event) => {
+      const detail = (event as CustomEvent<{ invoiceId?: string }>).detail;
+      if (!detail?.invoiceId) return;
+      setKitchenAlerts((prev) => prev.filter((a) => a.invoiceId !== detail.invoiceId));
+    };
+    window.addEventListener(TABLE_READY_EVENT, onReady);
+    window.addEventListener(TABLE_SERVED_EVENT, onServed);
+    return () => {
+      window.removeEventListener(TABLE_READY_EVENT, onReady);
+      window.removeEventListener(TABLE_SERVED_EVENT, onServed);
+    };
+  }, [waiterIdentity?.id, waiterIdentity?.kind]);
+
+  useEffect(() => {
+    if (!waiterIdentity) {
+      setKitchenAlerts([]);
+      return;
+    }
+    let cancelled = false;
+    async function pollReadyQueue() {
+      try {
+        const res = await api.get("/v1/pos/table-ready-queue");
+        if (cancelled) return;
+        const mine = (res.data as Array<Parameters<typeof queueRowToReadyDetail>[0]>)
+          .map(queueRowToReadyDetail)
+          .filter((detail) => matchesOrderWaiter(detail, waiterIdentity));
+        if (mine.length === 0) return;
+        setKitchenAlerts((prev) => {
+          const merged = [...mine];
+          for (const alert of prev) {
+            if (!merged.some((a) => a.invoiceId === alert.invoiceId)) merged.push(alert);
+          }
+          return merged.slice(0, 8);
+        });
+      } catch {
+        // ignore polling errors
+      }
+    }
+    void pollReadyQueue();
+    const timer = window.setInterval(pollReadyQueue, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [waiterIdentity?.id, waiterIdentity?.kind]);
+
+  async function markOrderServed(invoiceId: string, serviceType?: string) {
+    setMarkingServedId(invoiceId);
+    try {
+      if (serviceType === "dine_in" || !serviceType) {
+        await api.post(`/v1/pos/invoices/${invoiceId}/mark-table-served`);
+      } else {
+        await api.post(`/v1/pos/invoices/${invoiceId}/pickup-delivered`);
+      }
+      setKitchenAlerts((prev) => prev.filter((a) => a.invoiceId !== invoiceId));
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(typeof msg === "string" ? msg : "No se pudo marcar como servido");
+    } finally {
+      setMarkingServedId(null);
+    }
+  }
 
   useEffect(() => {
     setBranchId(branchId);
@@ -154,10 +267,98 @@ export default function WaiterKioskShell({
         </button>
       </header>
 
-      {!activeWaiter && (
+      {!waiterIdentity && (
         <div className="yall-kiosk-identify">
-          <span>Identifícate con tu PIN de mesero para registrar propinas y comandas.</span>
+          <span>Identifícate con tu PIN de mesero para registrar comandas. Los avisos de cocina usan tu sesión de mesero.</span>
           <button type="button" onClick={() => setPinAction("identify")}>Ingresar PIN</button>
+        </div>
+      )}
+
+      {kitchenAlerts.length > 0 && (
+        <div style={{ padding: "12px 16px 0", display: "grid", gap: 10 }}>
+          {kitchenAlerts.map((alert) => (
+            <div
+              key={alert.invoiceId}
+              style={{
+                padding: "12px 16px",
+                borderRadius: 12,
+                background: "#dcfce7",
+                border: "2px solid #22c55e",
+                color: "#14532d",
+                fontWeight: 600,
+                fontSize: 14,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>
+                🟢 Cocina lista — {alert.orderLabel ?? alert.tableLabel}
+                {alert.itemsSummary ? ` · ${alert.itemsSummary}` : ""}
+                <span style={{ display: "block", fontSize: 12, fontWeight: 500, marginTop: 4 }}>
+                  {orderReadyActionLabel(alert)}
+                </span>
+              </span>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {alert.tableSessionId && (
+                  <button
+                    type="button"
+                    onClick={() => openOrder(alert.tableSessionId!)}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#2563eb",
+                      color: "#fff",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Abrir comanda
+                  </button>
+                )}
+                {alert.waiterWhatsAppLink && (
+                  <a
+                    href={alert.waiterWhatsAppLink}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      background: "#128C7E",
+                      color: "#fff",
+                      textDecoration: "none",
+                      fontWeight: 700,
+                    }}
+                  >
+                    WhatsApp
+                  </a>
+                )}
+                {alert.invoiceId && (
+                  <button
+                    type="button"
+                    onClick={() => markOrderServed(alert.invoiceId!, alert.serviceType)}
+                    disabled={markingServedId === alert.invoiceId}
+                    style={{
+                      padding: "8px 12px",
+                      borderRadius: 8,
+                      border: "1px solid #86efac",
+                      background: "#fff",
+                      color: "#14532d",
+                      cursor: "pointer",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {markingServedId === alert.invoiceId
+                      ? "…"
+                      : alert.actionHint === "pickup" ? "Retirado" : "Servido"}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

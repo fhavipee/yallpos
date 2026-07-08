@@ -201,14 +201,17 @@ model TaxDefinition {
 }
 
 model Category {
-  id        String  @id @default(uuid())
-  branchId  String
-  parentId  String?
-  name      String
-  color     String?
-  icon      String?
-  sortOrder Int     @default(0)
-  isActive  Boolean @default(true)
+  id            String  @id @default(uuid())
+  branchId      String
+  parentId      String?
+  name          String
+  description   String?
+  color         String?
+  icon          String?
+  imageUrl      String?
+  mobileDisplay String  @default("image")
+  sortOrder     Int     @default(0)
+  isActive      Boolean @default(true)
 
   branch   Branch     @relation(fields: [branchId], references: [id])
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
@@ -568,6 +571,7 @@ model SalesInvoice {
   pickupPhone       String?
   pickupCode        String?
   pickupNotifiedAt  DateTime?
+  pickupDeliveredAt DateTime?
   tableReadyNotifiedAt DateTime?
   tableReadyServedAt     DateTime?
   tableReadyOverdueNotifiedAt DateTime?

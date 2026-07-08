@@ -19,17 +19,37 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
   const [method2, setMethod2] = useState<PaymentMethod>("card");
   const [amount1, setAmount1] = useState("");
   const [cashReceived, setCashReceived] = useState(String(total));
+  const [giveChange, setGiveChange] = useState(false);
 
   const tipNum = Number(tip) || 0;
   const totalWithTip = total + tipNum;
+  const cashReceivedNum = Number(cashReceived) || 0;
+  const cashExcess = method1 === "cash" && !split ? Math.max(0, cashReceivedNum - totalWithTip) : 0;
+  const tipFromExcess = cashExcess > 0 && !giveChange ? cashExcess : 0;
+  const finalTip = tipNum + tipFromExcess;
+  const finalCharge = total + finalTip;
+  const change = cashExcess > 0 && giveChange ? cashExcess : 0;
 
   const tipPresets = [0, 0.1, 0.15, 0.2].map((p) => Math.round(total * p));
 
   function confirmSingle() {
-    const amount = method1 === "cash"
-      ? String(totalWithTip)
-      : String(totalWithTip);
-    onConfirm({ payments: [{ method: method1, amount }], tipAmount: tip || "0" });
+    if (method1 === "cash") {
+      if (cashReceivedNum < totalWithTip) {
+        alert("El efectivo recibido no cubre el total");
+        return;
+      }
+      const payAmount = giveChange ? totalWithTip : cashReceivedNum;
+      onConfirm({
+        payments: [{ method: method1, amount: String(payAmount) }],
+        tipAmount: String(finalTip),
+      });
+      return;
+    }
+
+    onConfirm({
+      payments: [{ method: method1, amount: String(totalWithTip) }],
+      tipAmount: String(tipNum),
+    });
   }
 
   function confirmSplit() {
@@ -44,8 +64,6 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
       tipAmount: tip || "0",
     });
   }
-
-  const change = Number(cashReceived) - totalWithTip;
 
   return (
     <div style={{
@@ -78,9 +96,14 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
           <input value={tip} onChange={(e) => setTip(e.target.value)} type="number" style={inputStyle} placeholder="0" />
         </label>
 
-        {tipNum > 0 && (
+        {(tipNum > 0 || tipFromExcess > 0) && (
           <div style={{ fontSize: 14, color: "var(--t-muted)", marginBottom: 12 }}>
-            Total con propina: <strong>{formatCOP(totalWithTip)}</strong>
+            Propina total: <strong>{formatCOP(finalTip)}</strong>
+            {tipFromExcess > 0 && (
+              <span style={{ display: "block", fontSize: 12, marginTop: 4, color: "var(--t-success-fg)" }}>
+                Incluye {formatCOP(tipFromExcess)} del excedente en efectivo
+              </span>
+            )}
           </div>
         )}
 
@@ -111,11 +134,46 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
               ))}
             </div>
             {method1 === "cash" && (
-              <label style={labelStyle}>
-                Recibido
-                <input value={cashReceived} onChange={(e) => setCashReceived(e.target.value)} type="number" style={inputStyle} />
-                {change >= 0 && <span style={{ color: "var(--t-success-fg)" }}>Vuelto: {formatCOP(change)}</span>}
-              </label>
+              <>
+                <label style={labelStyle}>
+                  Recibido
+                  <input
+                    value={cashReceived}
+                    onChange={(e) => {
+                      setCashReceived(e.target.value);
+                      setGiveChange(false);
+                    }}
+                    type="number"
+                    style={inputStyle}
+                  />
+                </label>
+                {cashExcess > 0 && (
+                  <div style={{
+                    marginBottom: 12,
+                    padding: 10,
+                    borderRadius: 8,
+                    background: giveChange ? "var(--t-card-alt)" : "var(--t-success-soft)",
+                    border: `1px solid ${giveChange ? "var(--t-border)" : "var(--t-success-border)"}`,
+                    fontSize: 13,
+                  }}>
+                    {giveChange ? (
+                      <span style={{ color: "var(--t-success-fg)" }}>Vuelto: <strong>{formatCOP(change)}</strong></span>
+                    ) : (
+                      <span>
+                        Excedente <strong>{formatCOP(cashExcess)}</strong> → propina
+                      </span>
+                    )}
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={giveChange}
+                        onChange={(e) => setGiveChange(e.target.checked)}
+                      />
+                      Dar vuelto al cliente
+                    </label>
+                  </div>
+                )}
+              </>
             )}
           </>
         ) : (
@@ -154,7 +212,7 @@ export default function PaymentModal({ total, onConfirm, onClose }: Props) {
             onClick={split ? confirmSplit : confirmSingle}
             style={{ flex: 1, padding: 14, borderRadius: 10, border: "none", background: "var(--t-green-fg)", color: "var(--t-primary-fg)", fontWeight: 700, cursor: "pointer" }}
           >
-            Cobrar {formatCOP(totalWithTip)}
+            Cobrar {formatCOP(method1 === "cash" && !split && !giveChange && cashExcess > 0 ? finalCharge : totalWithTip)}
           </button>
         </div>
       </div>

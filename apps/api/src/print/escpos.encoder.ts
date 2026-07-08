@@ -78,9 +78,18 @@ export type ReceiptData = {
   cude?: string;
   isContingency?: boolean;
   simulationMode?: boolean;
+  serviceType?: string;
   tableLabel?: string;
+  orderLabel?: string;
   waiterName?: string;
   guestsCount?: number;
+  deliveryInfo?: {
+    name?: string;
+    phone?: string;
+    address?: string;
+    reference?: string;
+    fee?: number;
+  };
   lines: ReceiptLine[];
   subtotal: number;
   tax: number;
@@ -109,7 +118,18 @@ export function buildEscPosReceipt(data: ReceiptData, paperWidth = 32): Buffer {
     enc.line("DOCUMENTO EQUIVALENTE POS");
   }
   enc.bold(false);
-  if (data.tableLabel) enc.line(`Mesa: ${data.tableLabel}`);
+  if (data.orderLabel) {
+    enc.line(data.serviceType === "dine_in" ? `Mesa: ${data.orderLabel}` : data.orderLabel);
+  } else if (data.tableLabel) {
+    enc.line(`Mesa: ${data.tableLabel}`);
+  }
+  if (data.deliveryInfo) {
+    enc.bold(true).line("DOMICILIO").bold(false);
+    if (data.deliveryInfo.name) enc.line(`Cliente: ${data.deliveryInfo.name}`);
+    if (data.deliveryInfo.phone) enc.line(`Tel: ${data.deliveryInfo.phone}`);
+    if (data.deliveryInfo.address) enc.line(`Dir: ${data.deliveryInfo.address}`);
+    if (data.deliveryInfo.reference) enc.line(`Ref: ${data.deliveryInfo.reference}`);
+  }
   if (data.waiterName) enc.line(`Mesero: ${data.waiterName}`);
   if (data.guestsCount) enc.line(`Comensales: ${data.guestsCount}`);
   if (data.docNumber && !data.simulationMode) enc.line(`No: ${data.docNumber}`);
@@ -144,6 +164,9 @@ export function buildEscPosReceipt(data: ReceiptData, paperWidth = 32): Buffer {
     enc.line(`Impuestos: $${totalTax.toLocaleString("es-CO")}`);
   }
   if (data.tip) enc.line(`Propina:  $${data.tip.toLocaleString("es-CO")}`);
+  if (data.deliveryInfo?.fee) {
+    enc.line(`Domicilio: $${data.deliveryInfo.fee.toLocaleString("es-CO")}`);
+  }
   enc.bold(true).line(`TOTAL:    $${data.total.toLocaleString("es-CO")}`).bold(false);
 
   enc.separator("-", paperWidth);
