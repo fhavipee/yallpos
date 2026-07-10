@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY package.json ./
 COPY tsconfig.json index.html vite.config.ts ./
+COPY public ./public/
 COPY src ./src/
 
 ARG VITE_API_URL=

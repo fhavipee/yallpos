@@ -154,10 +154,6 @@ export default function App() {
     setTab("counter");
   }
 
-  if (!user) {
-    return <Login onLogin={(u) => { clearBranchId(); setUser(u); loadCompanies(); }} />;
-  }
-
   const branches = companies.flatMap((c) => c.branches);
   const currentBranch = branches.find((b) => b.id === branchId);
   const currentCompany = companies.find((c) => c.branches.some((b) => b.id === branchId));
@@ -165,7 +161,7 @@ export default function App() {
 
   const restaurantSwipeTabs = useMemo(() => ["tables", "order"] as const, []);
   const swipeEnabled = Boolean(
-    branchId && isRestaurant && canViewFloor(user) && (tab === "tables" || tab === "order"),
+    user && branchId && isRestaurant && canViewFloor(user) && (tab === "tables" || tab === "order"),
   );
   const swipeRef = useSwipeTabs(
     restaurantSwipeTabs,
@@ -192,6 +188,10 @@ export default function App() {
 
   const bg = "var(--t-bg)";
   const fg = "var(--t-fg)";
+
+  if (!user) {
+    return <Login onLogin={(u) => { clearBranchId(); setUser(u); loadCompanies(); }} />;
+  }
 
   if (branchId && standaloneView === "pickup-board") {
     return <PickupBoard branchId={branchId} kiosk />;
