@@ -1135,3 +1135,108 @@ select option {
   cursor: pointer;
 }
 
+/* Modo mesero (quiosco) */
+.yall-kiosk-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: #1e3a5f;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+[data-theme="dark"] .yall-kiosk-header {
+  background: #0f172a;
+  border-bottom: 1px solid var(--t-border);
+}
+
+.yall-kiosk-header__brand {
+  flex: 1;
+  min-width: 0;
+}
+
+.yall-kiosk-header__title {
+  font-weight: 800;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yall-kiosk-header__subtitle {
+  font-size: 11px;
+  opacity: 0.88;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 1px;
+}
+
+.yall-kiosk-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.yall-kiosk-header__btn {
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  white-space: nowrap;
+  min-height: 36px;
+  line-height: 1.1;
+}
+
+.yall-kiosk-header__btn--theme {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 600;
+}
+
+.yall-kiosk-header__theme-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
+@media (max-width: 480px) {
+  .yall-kiosk-header {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+
+  .yall-kiosk-header__actions {
+    width: 100%;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  .yall-kiosk-header__btn--hide-narrow {
+    display: none;
+  }
+
+  .yall-kiosk-header__theme-label {
+    display: inline;
+  }
+}
+
+@media (max-width: 360px) {
+  .yall-kiosk-header__theme-label {
+    display: none;
+  }
+
+  .yall-kiosk-header__btn--theme {
+    min-width: 36px;
+    justify-content: center;
+    padding: 7px 8px;
+  }
+}
+

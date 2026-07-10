@@ -15,6 +15,7 @@ import {
   resolveWaiterIdentity,
 } from "../lib/kitchenReady";
 import PinPromptModal from "../components/PinPromptModal";
+import { useTheme } from "../lib/theme";
 import Tables from "./Tables";
 import Order from "./Order";
 
@@ -46,6 +47,7 @@ export default function WaiterKioskShell({
   const [pinBusy, setPinBusy] = useState(false);
   const [kitchenAlerts, setKitchenAlerts] = useState<TableReadyDetail[]>([]);
   const [markingServedId, setMarkingServedId] = useState<string | null>(null);
+  const { dark, toggleDark } = useTheme();
   const waiterIdentity = resolveWaiterIdentity(activeWaiter, user);
 
   useEffect(() => {
@@ -214,61 +216,60 @@ export default function WaiterKioskShell({
   const waiterLabel = activeWaiter?.name ?? user.name;
 
   return (
-    <div style={{
+    <div className="yall-kiosk-shell" style={{
       minHeight: "100vh",
       display: "flex",
       flexDirection: "column",
       background: "var(--t-subtle)",
       fontFamily: "'Inter', system-ui, sans-serif",
     }}>
-      <header style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "12px 16px",
-        background: "#1e3a5f",
-        color: "#fff",
-        position: "sticky",
-        top: 0,
-        zIndex: 20,
-      }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 18, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <header className="yall-kiosk-header">
+        <div className="yall-kiosk-header__brand">
+          <div className="yall-kiosk-header__title">
             {companyBrand || "YallPos"}
           </div>
-          <div style={{ fontSize: 12, opacity: 0.85, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div className="yall-kiosk-header__subtitle">
             {companyBrand ? "YallPos · Mesero" : "Mesero"} · {branchName ?? "Restaurante"} · {waiterLabel}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={() => { setPinError(null); setPinAction("identify"); }}
-          className="yall-touch-btn"
-          style={headerBtn}
-          title="Identificar mesero con PIN"
-        >
-          Cambiar
-        </button>
-        {!isWaiterUser(user) && (
+        <div className="yall-kiosk-header__actions">
           <button
             type="button"
-            onClick={() => { setPinError(null); setPinAction("exit"); }}
-            className="yall-touch-btn"
-            style={headerBtn}
-            title="Salir del modo mesero"
+            onClick={toggleDark}
+            className="yall-kiosk-header__btn yall-kiosk-header__btn--theme"
+            title={dark ? "Modo claro" : "Modo oscuro"}
+            aria-label={dark ? "Activar modo claro" : "Activar modo oscuro"}
           >
-            Modo completo
+            <span className="yall-kiosk-header__theme-icon" aria-hidden>{dark ? "☀️" : "🌙"}</span>
+            <span className="yall-kiosk-header__theme-label">{dark ? "Claro" : "Oscuro"}</span>
           </button>
-        )}
-        <button
-          type="button"
-          onClick={() => { setPinError(null); setPinAction("logout"); }}
-          className="yall-touch-btn"
-          style={headerBtn}
-          title="Cerrar sesión"
-        >
-          Salir
-        </button>
+          <button
+            type="button"
+            onClick={() => { setPinError(null); setPinAction("identify"); }}
+            className="yall-touch-btn yall-kiosk-header__btn"
+            title="Identificar mesero con PIN"
+          >
+            Cambiar
+          </button>
+          {!isWaiterUser(user) && (
+            <button
+              type="button"
+              onClick={() => { setPinError(null); setPinAction("exit"); }}
+              className="yall-touch-btn yall-kiosk-header__btn yall-kiosk-header__btn--hide-narrow"
+              title="Salir del modo mesero"
+            >
+              Modo completo
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => { setPinError(null); setPinAction("logout"); }}
+            className="yall-touch-btn yall-kiosk-header__btn"
+            title="Cerrar sesión"
+          >
+            Salir
+          </button>
+        </div>
       </header>
 
       {!waiterIdentity && (
@@ -467,17 +468,6 @@ function KioskTab({
     </button>
   );
 }
-
-const headerBtn: React.CSSProperties = {
-  padding: "8px 12px",
-  borderRadius: 8,
-  border: "1px solid rgba(255,255,255,0.35)",
-  background: "rgba(255,255,255,0.1)",
-  color: "#fff",
-  cursor: "pointer",
-  fontSize: 13,
-  whiteSpace: "nowrap",
-};
 
 const primaryBtn: React.CSSProperties = {
   padding: "12px 20px",
