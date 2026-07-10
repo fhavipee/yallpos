@@ -58,5 +58,7 @@ export class UpdateBranchSettingsDto {
   pos?: {
     /** Descuento máximo (%) que no requiere PIN de supervisor. */
     maxDiscountPercentWithoutPin?: number;
+    /** manual = esperar "Enviar a cocina"; auto = cada producto va al KDS al agregarlo. */
+    kitchenSendMode?: "manual" | "auto";
   };
 }

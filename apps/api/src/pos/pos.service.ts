@@ -471,10 +471,12 @@ export class PosService {
 
     await this.recalcInvoiceTotals(invoice.id);
 
-    if (invoice.status === "sent_to_kitchen") {
-      const inv = await this.getInvoice(branchId, invoice.id);
-      await this.kds.upsertTicketFromInvoice(branchId, inv);
+    const posSettings = await readBranchPosSettings(this.prisma, branchId);
+    if (posSettings.kitchenSendMode === "auto") {
+      // En modo auto, cada producto nuevo se empuja a cocina (primera vez o adicionales).
+      await this.sendToKitchen(branchId, invoice.id);
     }
+    // En modo manual no se envía al KDS hasta "Enviar a cocina" (aunque la cuenta ya esté en cocina).
 
     return line;
   }
@@ -1163,15 +1165,23 @@ export class PosService {
     const invoice = await this.prisma.salesInvoice.findFirst({ where: { id: invoiceId, branchId } });
     if (!invoice) throw new NotFoundException("Invoice not found");
     if (invoice.status === "paid" || invoice.status === "voided") throw new BadRequestException("Invoice not editable");
-    if (invoice.status === "sent_to_kitchen") {
-      throw new BadRequestException("No se puede cambiar cantidad despues de enviar a cocina");
-    }
 
     const line = await this.prisma.salesInvoiceLine.findFirst({
       where: { id: lineId, invoiceId },
       include: { modifiers: true },
     });
     if (!line) throw new NotFoundException("Line not found");
+
+    const activeKds = await this.prisma.kdsItem.findFirst({
+      where: {
+        invoiceLineId: lineId,
+        ticket: { branchId, invoiceId },
+        status: { not: "canceled" },
+      },
+    });
+    if (activeKds) {
+      throw new BadRequestException("No se puede cambiar cantidad de un producto ya enviado a cocina");
+    }
 
     const qtyNum = Number(qty);
     if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
@@ -1423,12 +1433,20 @@ export class PosService {
     const invoice = await this.prisma.salesInvoice.findFirst({ where: { id: invoiceId, branchId } });
     if (!invoice) throw new NotFoundException("Invoice not found");
     if (invoice.status === "paid" || invoice.status === "voided") throw new BadRequestException("Invoice not editable");
-    if (invoice.status === "sent_to_kitchen") {
-      throw new BadRequestException("No se puede cambiar la nota despues de enviar a cocina");
-    }
 
     const line = await this.prisma.salesInvoiceLine.findFirst({ where: { id: lineId, invoiceId } });
     if (!line) throw new NotFoundException("Line not found");
+
+    const activeKds = await this.prisma.kdsItem.findFirst({
+      where: {
+        invoiceLineId: lineId,
+        ticket: { branchId, invoiceId },
+        status: { not: "canceled" },
+      },
+    });
+    if (activeKds) {
+      throw new BadRequestException("No se puede cambiar la nota de un producto ya enviado a cocina");
+    }
 
     await this.prisma.salesInvoiceLine.update({
       where: { id: lineId },

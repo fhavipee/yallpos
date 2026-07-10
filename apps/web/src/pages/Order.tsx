@@ -48,6 +48,15 @@ function canWaiterVoidLine(inKitchen: boolean, kitchenStatus?: string | null) {
   return kitchenStatus === "new" || kitchenStatus === null;
 }
 
+function isLinePendingKitchen(kitchenStatus?: string | null) {
+  return kitchenStatus == null;
+}
+
+function canEditOpenLine(isPaid: boolean, kitchenStatus?: string | null) {
+  if (isPaid) return false;
+  return isLinePendingKitchen(kitchenStatus);
+}
+
 function lineKitchenStatusLabel(kitchenStatus?: string | null) {
   if (kitchenStatus === "preparing") return "Preparando en cocina";
   if (kitchenStatus === "ready") return "Listo en cocina";
@@ -93,6 +102,7 @@ export default function Order({
   const [showDiscount, setShowDiscount] = useState(false);
   const [applyingCourtesyId, setApplyingCourtesyId] = useState<string | null>(null);
   const [maxDiscountWithoutPin, setMaxDiscountWithoutPin] = useState(10);
+  const [kitchenSendMode, setKitchenSendMode] = useState<"manual" | "auto">("manual");
   const [pinPrompt, setPinPrompt] = useState<{
     title: string;
     description: string;
@@ -113,6 +123,7 @@ export default function Order({
     api.get("/v1/settings/branch").then((res) => {
       const max = Number(res.data?.pos?.maxDiscountPercentWithoutPin);
       setMaxDiscountWithoutPin(Number.isFinite(max) && max >= 0 && max <= 100 ? max : 10);
+      setKitchenSendMode(res.data?.pos?.kitchenSendMode === "auto" ? "auto" : "manual");
     }).catch(() => {});
   }, [branchId]);
 
@@ -518,7 +529,9 @@ export default function Order({
   }
 
   async function editLineNote(lineId: string, currentNote?: string | null) {
-    if (!invoice || invoice.status === "sent_to_kitchen") return;
+    if (!invoice) return;
+    const line = invoice.lines?.find((l: any) => l.id === lineId);
+    if (line && !canEditOpenLine(false, line.kitchenStatus)) return;
     const nextNote = window.prompt("Nota para cocina / preparación", currentNote ?? "");
     if (nextNote === null) return;
 
@@ -633,6 +646,8 @@ export default function Order({
   const linesTotal = invoice?.lines?.reduce((sum: number, line: any) => sum + Number(line.lineTotal), 0) ?? 0;
   const invoiceDiscount = Number(invoice?.discount ?? 0);
   const inKitchen = invoice?.status === "sent_to_kitchen";
+  const pendingKitchenCount = invoice?.lines?.filter((l: any) => isLinePendingKitchen(l.kitchenStatus)).length ?? 0;
+  const hasPendingKitchen = pendingKitchenCount > 0;
 
   if (!tableSessionId) {
     return (
@@ -958,7 +973,7 @@ export default function Order({
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <span>{l.nameSnapshot}</span>
-                  {!isPaid && !inKitchen && (
+                  {!isPaid && canEditOpenLine(isPaid, l.kitchenStatus) && (
                     <>
                       <button
                         onClick={() => changeLineQty(l.id, l.qty, -1)}
@@ -977,11 +992,11 @@ export default function Order({
                       </button>
                     </>
                   )}
-                  {(isPaid || inKitchen) && <span>×{l.qty}</span>}
+                  {(isPaid || !canEditOpenLine(isPaid, l.kitchenStatus)) && <span>×{l.qty}</span>}
                   {!isPaid && (
                     <button
                       onClick={() => editLineNote(l.id, l.lineNotes)}
-                      disabled={inKitchen || updatingNoteId === l.id}
+                      disabled={!canEditOpenLine(isPaid, l.kitchenStatus) || updatingNoteId === l.id}
                       style={{
                         fontSize: 11,
                         padding: "2px 6px",
@@ -989,12 +1004,15 @@ export default function Order({
                         border: "1px solid var(--t-border-strong)",
                         background: l.lineNotes ? "var(--t-accent-soft)" : "var(--t-card)",
                         color: "var(--t-fg)",
-                        cursor: inKitchen ? "not-allowed" : "pointer",
-                        opacity: inKitchen ? 0.6 : 1,
+                        cursor: !canEditOpenLine(isPaid, l.kitchenStatus) ? "not-allowed" : "pointer",
+                        opacity: !canEditOpenLine(isPaid, l.kitchenStatus) ? 0.6 : 1,
                       }}
                     >
                       {l.lineNotes ? "Nota ✓" : "Nota"}
                     </button>
+                  )}
+                  {isLinePendingKitchen(l.kitchenStatus) && !isPaid && (
+                    <span style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }}>Pendiente</span>
                   )}
                 </div>
                 {Array.isArray(l.modifiers) && l.modifiers.length > 0 && (
@@ -1116,16 +1134,22 @@ export default function Order({
                       {isMobile ? "🍴 Dividir cuenta" : "Dividir cuenta"}
                     </button>
                   )}
-                  <button
-                    onClick={sendToKitchen}
-                    disabled={!invoice?.lines?.length}
-                    className={isMobile ? "yall-order-action-btn" : undefined}
-                    style={btnSecondary}
-                  >
-                    {inKitchen
-                      ? (isMobile ? "🍳 Reenviar cocina" : "Reenviar comanda cocina")
-                      : (isMobile ? "🍳 Enviar a cocina" : "Enviar a cocina")}
-                  </button>
+                  {(kitchenSendMode === "manual" || hasPendingKitchen || !inKitchen) && (
+                    <button
+                      onClick={sendToKitchen}
+                      disabled={!invoice?.lines?.length || (kitchenSendMode === "manual" && inKitchen && !hasPendingKitchen)}
+                      className={isMobile ? "yall-order-action-btn" : undefined}
+                      style={btnSecondary}
+                    >
+                      {hasPendingKitchen
+                        ? (isMobile
+                          ? `🍳 Enviar ${pendingKitchenCount}`
+                          : `Enviar ${pendingKitchenCount} a cocina`)
+                        : inKitchen
+                          ? (isMobile ? "🍳 Reenviar cocina" : "Reenviar comanda cocina")
+                          : (isMobile ? "🍳 Enviar a cocina" : "Enviar a cocina")}
+                    </button>
+                  )}
                   {inKitchen && (
                     <>
                       <button
@@ -1140,9 +1164,23 @@ export default function Order({
                         {reprintingKitchen ? "Imprimiendo…" : (isMobile ? "🖨️ Reimprimir" : "Reimprimir comanda")}
                       </button>
                       <p style={{ margin: 0, fontSize: 11, color: "var(--t-muted)", textAlign: "center" }}>
-                        Nuevos ítems van automático al KDS
+                        {kitchenSendMode === "auto"
+                          ? "Modo automático: cada producto nuevo va al KDS"
+                          : hasPendingKitchen
+                            ? `${pendingKitchenCount} producto(s) pendiente(s) de enviar a cocina`
+                            : "Modo manual: agrega productos y envía cuando esté listo"}
                       </p>
                     </>
+                  )}
+                  {!inKitchen && kitchenSendMode === "auto" && (
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--t-muted)", textAlign: "center" }}>
+                      Modo automático: al agregar un producto se envía a cocina
+                    </p>
+                  )}
+                  {!inKitchen && kitchenSendMode === "manual" && invoice?.lines?.length > 0 && (
+                    <p style={{ margin: 0, fontSize: 11, color: "var(--t-muted)", textAlign: "center" }}>
+                      Modo manual: arma la comanda y luego envía a cocina
+                    </p>
                   )}
                   {canVoid && (
                     <button

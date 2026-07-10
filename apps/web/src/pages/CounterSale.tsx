@@ -91,6 +91,14 @@ function canWaiterVoidLine(inKitchen: boolean, kitchenStatus?: string | null) {
   return kitchenStatus === "new" || kitchenStatus === null;
 }
 
+function isLinePendingKitchen(kitchenStatus?: string | null) {
+  return kitchenStatus == null;
+}
+
+function canEditOpenLine(kitchenStatus?: string | null) {
+  return isLinePendingKitchen(kitchenStatus);
+}
+
 function lineKitchenStatusLabel(kitchenStatus?: string | null) {
   if (kitchenStatus === "preparing") return "Preparando en cocina";
   if (kitchenStatus === "ready") return "Listo en cocina";
@@ -137,6 +145,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   const [showDiscount, setShowDiscount] = useState(false);
   const [applyingCourtesyId, setApplyingCourtesyId] = useState<string | null>(null);
   const [maxDiscountWithoutPin, setMaxDiscountWithoutPin] = useState(10);
+  const [kitchenSendMode, setKitchenSendMode] = useState<"manual" | "auto">("manual");
   const [pinPrompt, setPinPrompt] = useState<{
     title: string;
     description: string;
@@ -231,6 +240,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     api.get("/v1/settings/branch").then((res) => {
       const max = Number(res.data?.pos?.maxDiscountPercentWithoutPin);
       setMaxDiscountWithoutPin(Number.isFinite(max) && max >= 0 && max <= 100 ? max : 10);
+      setKitchenSendMode(res.data?.pos?.kitchenSendMode === "auto" ? "auto" : "manual");
     }).catch(() => {});
   }, [branchId]);
 
@@ -476,7 +486,9 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
 
   async function removeLine(lineId: string, lineName?: string) {
     if (!invoice) return;
-    if (inKitchen) {
+    const line = invoice.lines?.find((l: any) => l.id === lineId);
+    const alreadyInKitchen = inKitchen && line && !isLinePendingKitchen(line.kitchenStatus);
+    if (alreadyInKitchen) {
       const ok = window.confirm(
         `¿Anular "${lineName ?? "este producto"}" en cocina?\nSe quitará del pedido y se avisará al KDS.`,
       );
@@ -518,7 +530,9 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   }
 
   async function editLineNote(lineId: string, currentNote?: string | null) {
-    if (!invoice || inKitchen) return;
+    if (!invoice) return;
+    const line = invoice.lines?.find((l: any) => l.id === lineId);
+    if (line && !canEditOpenLine(line.kitchenStatus)) return;
     const nextNote = window.prompt("Nota para cocina / preparación", currentNote ?? "");
     if (nextNote === null) return;
 
@@ -683,6 +697,8 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
 
   const isBakery = branchType === "bakery";
   const inKitchen = invoice?.status === "sent_to_kitchen";
+  const pendingKitchenCount = invoice?.lines?.filter((l: any) => isLinePendingKitchen(l.kitchenStatus)).length ?? 0;
+  const hasPendingKitchen = pendingKitchenCount > 0;
   const readyOrders = pickupQueue.filter((o) => o.kitchenStatus === "ready");
   const pendingOrders = pickupQueue.filter((o) => o.kitchenStatus !== "ready");
   const activeDeliveries = deliveryQueue.filter((o) => o.deliveryStatus !== "delivered");
@@ -1101,12 +1117,20 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
               🍳 En cocina
               {invoice.pickupCode ? ` · ${formatPickupLabel(invoice.pickupCode)}` : ""}
               {pickupPhone ? " — avisaremos al cliente" : ""}
+              {hasPendingKitchen ? ` · ${pendingKitchenCount} pendiente(s)` : ""}
             </div>
           )}
-          {invoice?.lines?.map((l: any) => (
+          {invoice?.lines?.map((l: any) => {
+            const lineEditable = canEditOpenLine(l.kitchenStatus);
+            return (
             <div key={l.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto auto auto", gap: 8, alignItems: "center", fontSize: 14, marginBottom: 6, color: "var(--t-fg)" }}>
               <div>
-                <div>{l.nameSnapshot}</div>
+                <div>
+                  {l.nameSnapshot}
+                  {isLinePendingKitchen(l.kitchenStatus) && (
+                    <span style={{ marginLeft: 6, fontSize: 11, color: "#b45309", fontWeight: 600 }}>Pendiente</span>
+                  )}
+                </div>
                 {Array.isArray(l.modifiers) && l.modifiers.length > 0 && (
                   <div style={{ fontSize: 11, color: "var(--t-muted)", marginTop: 2 }}>
                     {l.modifiers.map((m: any) => m.nameSnapshot).join(" · ")}
@@ -1124,16 +1148,16 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <button
                   onClick={() => changeLineQty(l.id, l.qty, -1)}
-                  disabled={updatingQtyId === l.id || inKitchen}
-                  style={qtyBtnStyle(updatingQtyId === l.id || inKitchen)}
+                  disabled={updatingQtyId === l.id || !lineEditable}
+                  style={qtyBtnStyle(updatingQtyId === l.id || !lineEditable)}
                 >
                   -
                 </button>
                 <strong style={{ minWidth: 26, textAlign: "center" }}>{Number(l.qty)}</strong>
                 <button
                   onClick={() => changeLineQty(l.id, l.qty, 1)}
-                  disabled={updatingQtyId === l.id || inKitchen}
-                  style={qtyBtnStyle(updatingQtyId === l.id || inKitchen)}
+                  disabled={updatingQtyId === l.id || !lineEditable}
+                  style={qtyBtnStyle(updatingQtyId === l.id || !lineEditable)}
                 >
                   +
                 </button>
@@ -1159,17 +1183,17 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
               </button>
               <button
                 onClick={() => editLineNote(l.id, l.lineNotes)}
-                disabled={updatingNoteId === l.id || inKitchen}
-                title={inKitchen ? "No se puede editar despues de enviar a cocina" : "Editar nota"}
+                disabled={updatingNoteId === l.id || !lineEditable}
+                title={!lineEditable ? "No se puede editar despues de enviar a cocina" : "Editar nota"}
                 style={{
                   padding: "4px 8px",
                   borderRadius: 6,
                   border: "1px solid var(--t-warn-border)",
                   background: "var(--t-warn-soft)",
                   color: "#fbbf24",
-                  cursor: inKitchen ? "not-allowed" : "pointer",
+                  cursor: !lineEditable ? "not-allowed" : "pointer",
                   fontSize: 12,
-                  opacity: updatingNoteId === l.id || inKitchen ? 0.6 : 1,
+                  opacity: updatingNoteId === l.id || !lineEditable ? 0.6 : 1,
                 }}
               >
                 {updatingNoteId === l.id ? "..." : "Nota"}
@@ -1180,7 +1204,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
                 title={
                   inKitchen && !canWaiterVoidLine(inKitchen, l.kitchenStatus)
                     ? "Ya está en preparación. Pide a cocina que lo anule."
-                    : inKitchen
+                    : inKitchen && !isLinePendingKitchen(l.kitchenStatus)
                       ? "Anular en cocina"
                       : "Quitar producto"
                 }
@@ -1195,10 +1219,11 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
                   opacity: removingLineId === l.id || !canWaiterVoidLine(inKitchen, l.kitchenStatus) ? 0.6 : 1,
                 }}
               >
-                {removingLineId === l.id ? "..." : (inKitchen ? "Anular" : "Quitar")}
+                {removingLineId === l.id ? "..." : (inKitchen && !isLinePendingKitchen(l.kitchenStatus) ? "Anular" : "Quitar")}
               </button>
             </div>
-          ))}
+            );
+          })}
           <hr />
           {invoiceDiscount > 0 && (
             <>
@@ -1321,19 +1346,33 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
             </div>
           )}
 
-          {!inKitchen && (
+          {(kitchenSendMode === "manual" || hasPendingKitchen || !inKitchen) && (
             <button
               onClick={sendToKitchen}
-              disabled={!invoice?.lines?.length || sendingKitchen}
+              disabled={!invoice?.lines?.length || sendingKitchen || (kitchenSendMode === "manual" && inKitchen && !hasPendingKitchen)}
               style={{
                 width: "100%", marginTop: 10, padding: "12px 0", borderRadius: 10,
                 border: "1px solid #2563eb", background: "var(--t-card)", color: "#60a5fa", fontWeight: 700, fontSize: 14,
-                cursor: invoice?.lines?.length ? "pointer" : "not-allowed",
-                opacity: invoice?.lines?.length ? 1 : 0.5,
+                cursor: invoice?.lines?.length && !(kitchenSendMode === "manual" && inKitchen && !hasPendingKitchen) ? "pointer" : "not-allowed",
+                opacity: invoice?.lines?.length && !(kitchenSendMode === "manual" && inKitchen && !hasPendingKitchen) ? 1 : 0.5,
               }}
             >
-              {sendingKitchen ? "Enviando…" : "Enviar a cocina"}
+              {sendingKitchen
+                ? "Enviando…"
+                : hasPendingKitchen
+                  ? `Enviar ${pendingKitchenCount} a cocina`
+                  : "Enviar a cocina"}
             </button>
+          )}
+          {kitchenSendMode === "auto" && (
+            <p style={{ fontSize: 11, color: "var(--t-muted)", margin: "8px 0 0", textAlign: "center" }}>
+              Modo automático: cada producto se envía al KDS al agregarlo
+            </p>
+          )}
+          {kitchenSendMode === "manual" && hasPendingKitchen && (
+            <p style={{ fontSize: 11, color: "#b45309", margin: "8px 0 0", textAlign: "center" }}>
+              {pendingKitchenCount} producto(s) pendiente(s) de cocina
+            </p>
           )}
 
           {invoice?.lines?.length > 0 && (

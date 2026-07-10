@@ -2,8 +2,12 @@ import { UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { KioskSettings, verifyAdminPin, verifyPin } from "../common/pin.util";
 
+export type KitchenSendMode = "manual" | "auto";
+
 export type BranchPosSettings = {
   maxDiscountPercentWithoutPin: number;
+  /** manual: productos quedan pendientes hasta "Enviar a cocina". auto: cada producto va al KDS al agregarlo. */
+  kitchenSendMode: KitchenSendMode;
 };
 
 export async function readBranchPosSettings(
@@ -15,7 +19,7 @@ export async function readBranchPosSettings(
     include: { company: { include: { tenant: true } } },
   });
   if (!branch) {
-    return { maxDiscountPercentWithoutPin: 10 };
+    return { maxDiscountPercentWithoutPin: 10, kitchenSendMode: "manual" };
   }
 
   const settings = (branch.company.tenant.settings ?? {}) as Record<string, unknown>;
@@ -23,10 +27,12 @@ export async function readBranchPosSettings(
   const branchSettings = (branches[branchId] ?? {}) as Record<string, unknown>;
   const pos = (branchSettings.pos ?? {}) as Record<string, unknown>;
   const max = Number(pos.maxDiscountPercentWithoutPin);
+  const mode = pos.kitchenSendMode === "auto" ? "auto" : "manual";
 
   return {
     maxDiscountPercentWithoutPin:
       Number.isFinite(max) && max >= 0 && max <= 100 ? max : 10,
+    kitchenSendMode: mode,
   };
 }
 

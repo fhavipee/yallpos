@@ -35,7 +35,10 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
   const [waiters, setWaiters] = useState<{ id: string; name: string; phone?: string | null }[]>([]);
   const [savingWaiterId, setSavingWaiterId] = useState<string | null>(null);
   const [kiosk, setKiosk] = useState({ adminPin: "", hasAdminPin: false });
-  const [pos, setPos] = useState({ maxDiscountPercentWithoutPin: "10" });
+  const [pos, setPos] = useState({
+    maxDiscountPercentWithoutPin: "10",
+    kitchenSendMode: "manual" as "manual" | "auto",
+  });
 
   useEffect(() => {
     setBranchId(branchId);
@@ -65,7 +68,10 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
       const k = r.data?.kiosk ?? {};
       setKiosk({ adminPin: "", hasAdminPin: Boolean(k.hasAdminPin) });
       const p = r.data?.pos ?? {};
-      setPos({ maxDiscountPercentWithoutPin: String(p.maxDiscountPercentWithoutPin ?? 10) });
+      setPos({
+        maxDiscountPercentWithoutPin: String(p.maxDiscountPercentWithoutPin ?? 10),
+        kitchenSendMode: p.kitchenSendMode === "auto" ? "auto" : "manual",
+      });
     }).catch(() => {});
     api.get("/v1/restaurant/waiters").then((r) => setWaiters(r.data)).catch(() => {});
     refreshAgent();
@@ -139,7 +145,10 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
       return;
     }
     await api.patch("/v1/settings/branch", {
-      pos: { maxDiscountPercentWithoutPin: max },
+      pos: {
+        maxDiscountPercentWithoutPin: max,
+        kitchenSendMode: pos.kitchenSendMode,
+      },
     });
     flashSaved();
   }
@@ -386,9 +395,44 @@ node index.js`}
         <Field
           label="Descuento máximo sin PIN (%)"
           value={pos.maxDiscountPercentWithoutPin}
-          onChange={(v) => setPos({ maxDiscountPercentWithoutPin: v.replace(/[^\d.]/g, "").slice(0, 5) })}
+          onChange={(v) => setPos({ ...pos, maxDiscountPercentWithoutPin: v.replace(/[^\d.]/g, "").slice(0, 5) })}
           placeholder="10"
         />
+        <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 16, marginBottom: 8 }}>
+          Envío a cocina (comanda y mostrador)
+        </p>
+        <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
+            <input
+              type="radio"
+              name="kitchenSendMode"
+              checked={pos.kitchenSendMode === "manual"}
+              onChange={() => setPos({ ...pos, kitchenSendMode: "manual" })}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              <strong>Manual</strong>
+              <span style={{ display: "block", fontSize: 12, color: "var(--t-muted)", marginTop: 2 }}>
+                Los productos quedan pendientes hasta que pulses “Enviar a cocina”. Ideal para armar la comanda completa.
+              </span>
+            </span>
+          </label>
+          <label style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
+            <input
+              type="radio"
+              name="kitchenSendMode"
+              checked={pos.kitchenSendMode === "auto"}
+              onChange={() => setPos({ ...pos, kitchenSendMode: "auto" })}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              <strong>Automático</strong>
+              <span style={{ display: "block", fontSize: 12, color: "var(--t-muted)", marginTop: 2 }}>
+                Cada producto se envía al KDS al agregarlo (comanda o mostrador).
+              </span>
+            </span>
+          </label>
+        </div>
         <button onClick={savePosSettings} style={btnSave}>Guardar POS</button>
       </section>
 
