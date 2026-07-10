@@ -31,12 +31,27 @@ export async function getPrintAgentStatus(): Promise<PrintAgentStatus | null> {
   }
 }
 
-async function sendToPrintAgent(base64: string, target: "cash" | "kitchen", config?: PrinterConfig): Promise<boolean> {
+async function sendToPrintAgent(
+  base64: string,
+  target: "cash" | "kitchen",
+  config?: PrinterConfig,
+  override?: { printerIp?: string | null; printerPort?: number | null },
+): Promise<boolean> {
   try {
+    const payload = {
+      base64,
+      ...printerPayload(target, config),
+      ...(override?.printerIp
+        ? {
+            printerIp: override.printerIp,
+            printerPort: Number(override.printerPort) || 9100,
+          }
+        : {}),
+    };
     const res = await fetch(`${PRINT_AGENT}/print`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ base64, ...printerPayload(target, config) }),
+      body: JSON.stringify(payload),
     });
     return res.ok;
   } catch {
@@ -134,6 +149,43 @@ export async function reprintInvoice(invoiceId: string) {
 export async function printKitchenTicket(invoiceId: string) {
   const config = loadPrinterConfig();
   const methods: string[] = [];
+
+  try {
+    const byStation = await api.get(`/v1/print/invoices/${invoiceId}/kitchen-by-station.escpos`);
+    const tickets = (byStation.data?.tickets ?? []) as Array<{
+      stationId: string;
+      stationName: string;
+      printerIp: string | null;
+      printerPort: number;
+      printerName: string | null;
+      lineCount: number;
+      base64: string;
+    }>;
+
+    if (tickets.length > 0) {
+      let printed = 0;
+      for (const ticket of tickets) {
+        const ip = ticket.printerIp || config.kitchenPrinterIp || null;
+        const port = ticket.printerIp
+          ? ticket.printerPort
+          : Number(config.kitchenPrinterPort) || 9100;
+        if (!ip && !config.kitchenPrinterIp) continue;
+        const ok = await sendToPrintAgent(ticket.base64, "kitchen", config, {
+          printerIp: ip || config.kitchenPrinterIp,
+          printerPort: port,
+        });
+        if (ok) {
+          printed += 1;
+          methods.push(`escpos-${ticket.stationName}`);
+        }
+      }
+      if (printed > 0) {
+        return { ok: true, methods };
+      }
+    }
+  } catch {
+    // fallback al ticket único
+  }
 
   try {
     const esc = await api.get(`/v1/print/invoices/${invoiceId}/kitchen.escpos`);

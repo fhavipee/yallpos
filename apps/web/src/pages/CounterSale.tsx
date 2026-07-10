@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { api, setBranchId, formatCOP } from "../lib/api";
-import { printInvoiceReceipt, printKitchenLineVoidEscpos, printKitchenVoidTicket } from "../lib/print";
+import { printInvoiceReceipt, printKitchenLineVoidEscpos, printKitchenVoidTicket, printKitchenTicket } from "../lib/print";
 import { useBarcodeScanner } from "../lib/barcode";
 import CategoryPicker from "../components/CategoryPicker";
 import ModifierPickerModal from "../components/ModifierPickerModal";
@@ -602,13 +602,17 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       const res = await api.post(`/v1/pos/invoices/${invoice.id}/send-to-kitchen`);
       setInvoice(res.data);
       refreshPickupQueue();
+      const print = await printKitchenTicket(res.data.id);
+      const printNote = print.methods.length
+        ? `\nImpresión: ${print.methods.join(", ")}`
+        : "";
       const code = res.data.pickupCode ? ` ${formatPickupLabel(res.data.pickupCode)}.` : "";
       if (saleMode === "delivery") {
-        alert("Domicilio enviado a cocina.");
+        alert(`Domicilio enviado a cocina.${printNote}`);
       } else if (pickupPhone) {
-        alert(`Pedido enviado a cocina.${code} Avisaremos al cliente cuando esté listo.`);
+        alert(`Pedido enviado a cocina.${code} Avisaremos al cliente cuando esté listo.${printNote}`);
       } else {
-        alert(`Pedido enviado a cocina.${code}`);
+        alert(`Pedido enviado a cocina.${code}${printNote}`);
       }
     } catch (err: any) {
       alert(err.response?.data?.message ?? "No se pudo enviar a cocina");

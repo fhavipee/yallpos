@@ -681,10 +681,15 @@ enum KdsTicketStatus {
 }
 
 model KdsStation {
-  id       String  @id @default(uuid())
-  branchId String
-  name     String
-  isActive Boolean @default(true)
+  id          String  @id @default(uuid())
+  branchId    String
+  name        String
+  isActive    Boolean @default(true)
+  /// IP de impresora térmica (red local o remota vía print-agent)
+  printerIp   String?
+  printerPort Int     @default(9100)
+  /// Etiqueta opcional, ej. "Sushi-bar Epson"
+  printerName String?
 
   branch       Branch           @relation(fields: [branchId], references: [id])
   routingRules KdsRoutingRule[]

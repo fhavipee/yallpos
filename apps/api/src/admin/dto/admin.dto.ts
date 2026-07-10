@@ -84,6 +84,9 @@ export class ResetPasswordDto {
 export class UpsertKdsStationDto {
   @IsString() name!: string;
   @IsOptional() @IsBoolean() isActive?: boolean;
+  @IsOptional() @IsString() printerIp?: string;
+  @IsOptional() @IsInt() printerPort?: number;
+  @IsOptional() @IsString() printerName?: string;
 }
 
 export class UpsertKdsRoutingDto {

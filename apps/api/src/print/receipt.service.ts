@@ -262,6 +262,115 @@ h1{font-size:16px;text-align:center;margin:0}.meta{font-size:12px;margin:4px 0}h
     return { base64: buf.toString("base64"), bytes: buf.length };
   }
 
+  /**
+   * Genera un ticket ESC/POS por cada estación KDS con ítems activos.
+   * Cada ticket incluye la IP de impresora configurada en la estación (si existe).
+   */
+  async getKitchenStationTickets(
+    branchId: string,
+    invoiceId: string,
+  ): Promise<{
+    tickets: Array<{
+      stationId: string;
+      stationName: string;
+      printerIp: string | null;
+      printerPort: number;
+      printerName: string | null;
+      lineCount: number;
+      base64: string;
+      bytes: number;
+    }>;
+  }> {
+    const { buildEscPosKitchen } = await import("./escpos.encoder");
+    const base = await this.getKitchenData(branchId, invoiceId);
+
+    const kdsItems = await this.prisma.kdsItem.findMany({
+      where: {
+        ticket: { branchId, invoiceId },
+        status: { not: "canceled" },
+      },
+      include: {
+        station: true,
+        // invoiceLineId links to sales line
+      },
+    });
+
+    if (kdsItems.length === 0) {
+      // Sin ítems en KDS: un solo ticket genérico (compatibilidad)
+      const buf = buildEscPosKitchen(base);
+      return {
+        tickets: [{
+          stationId: "default",
+          stationName: "Cocina",
+          printerIp: null,
+          printerPort: 9100,
+          printerName: null,
+          lineCount: base.lines.length,
+          base64: buf.toString("base64"),
+          bytes: buf.length,
+        }],
+      };
+    }
+
+    const invoice = await this.prisma.salesInvoice.findFirst({
+      where: { id: invoiceId, branchId },
+      include: { lines: { include: { modifiers: true } } },
+    });
+    if (!invoice) throw new NotFoundException("Comanda no encontrada");
+
+    const lineById = new Map(invoice.lines.map((l) => [l.id, l]));
+    const byStation = new Map<string, {
+      station: { id: string; name: string; printerIp: string | null; printerPort: number; printerName: string | null };
+      lines: typeof base.lines;
+    }>();
+
+    for (const item of kdsItems) {
+      const line = lineById.get(item.invoiceLineId);
+      if (!line) continue;
+      const station = item.station;
+      if (!station) continue;
+      const key = station.id;
+      if (!byStation.has(key)) {
+        byStation.set(key, {
+          station: {
+            id: station.id,
+            name: station.name,
+            printerIp: station.printerIp,
+            printerPort: station.printerPort ?? 9100,
+            printerName: station.printerName,
+          },
+          lines: [],
+        });
+      }
+      byStation.get(key)!.lines.push({
+        qty: String(line.qty),
+        name: line.nameSnapshot,
+        modifiers: line.modifiers.map((m) => m.nameSnapshot),
+        notes: line.lineNotes ?? undefined,
+      });
+    }
+
+    const tickets = [...byStation.values()].map(({ station, lines }) => {
+      const buf = buildEscPosKitchen({
+        ...base,
+        stationName: station.name,
+        lines,
+      });
+      return {
+        stationId: station.id,
+        stationName: station.name,
+        printerIp: station.printerIp,
+        printerPort: station.printerPort,
+        printerName: station.printerName,
+        lineCount: lines.length,
+        base64: buf.toString("base64"),
+        bytes: buf.length,
+      };
+    });
+
+    return { tickets };
+  }
+
   async getKitchenVoidHtml(branchId: string, invoiceId: string): Promise<string> {
     const data = await this.getKitchenVoidData(branchId, invoiceId);
     const rows = data.lines

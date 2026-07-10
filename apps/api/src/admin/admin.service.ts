@@ -829,7 +829,16 @@ export class AdminService {
 
   async createKdsStation(branchId: string, user: AuthUser, dto: UpsertKdsStationDto) {
     await this.branchContext(branchId, user.tenantId);
-    const created = await this.prisma.kdsStation.create({ data: { branchId, name: dto.name, isActive: dto.isActive ?? true } });
+    const created = await this.prisma.kdsStation.create({
+      data: {
+        branchId,
+        name: dto.name,
+        isActive: dto.isActive ?? true,
+        printerIp: dto.printerIp?.trim() || null,
+        printerPort: dto.printerPort ?? 9100,
+        printerName: dto.printerName?.trim() || null,
+      },
+    });
     await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "create", entity: "kds_station", entityId: created.id, branchId, payload: dto });
     return created;
   }
@@ -838,7 +847,16 @@ export class AdminService {
     await this.branchContext(branchId, user.tenantId);
     const station = await this.prisma.kdsStation.findFirst({ where: { id, branchId } });
     if (!station) throw new NotFoundException("Estación no encontrada");
-    const updated = await this.prisma.kdsStation.update({ where: { id }, data: { name: dto.name, isActive: dto.isActive ?? station.isActive } });
+    const updated = await this.prisma.kdsStation.update({
+      where: { id },
+      data: {
+        name: dto.name,
+        isActive: dto.isActive ?? station.isActive,
+        ...(dto.printerIp !== undefined ? { printerIp: dto.printerIp.trim() || null } : {}),
+        ...(dto.printerPort !== undefined ? { printerPort: dto.printerPort } : {}),
+        ...(dto.printerName !== undefined ? { printerName: dto.printerName.trim() || null } : {}),
+      },
+    });
     await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "update", entity: "kds_station", entityId: id, branchId, payload: dto });
     return updated;
   }

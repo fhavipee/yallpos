@@ -43,6 +43,13 @@ export class PrintController {
     return this.receipts.getKitchenEscPosBase64(branchId, id);
   }
 
+  /** Un ticket ESC/POS por estación KDS, con IP de impresora de la estación. */
+  @Roles(...FLOOR_ROLES)
+  @Get("invoices/:id/kitchen-by-station.escpos")
+  getKitchenByStationEscPos(@BranchId() branchId: string, @Param("id") id: string) {
+    return this.receipts.getKitchenStationTickets(branchId, id);
+  }
+
   @Roles(...FLOOR_ROLES)
   @Get("invoices/:id/kitchen-void.html")
   async getKitchenVoidHtml(@BranchId() branchId: string, @Param("id") id: string, @Res() res: Response) {

@@ -192,6 +192,7 @@ export type KitchenTicketData = {
   tableLabel: string;
   waiterName: string;
   guestsCount?: number;
+  stationName?: string;
   lines: { qty: string; name: string; modifiers?: string[]; notes?: string }[];
   printedAt: string;
 };
@@ -204,7 +205,7 @@ export function buildEscPosKitchen(data: KitchenTicketData, paperWidth = 32): Bu
   const enc = new EscPosEncoder().init();
 
   enc.align("center").bold(true).size(2, 2).line("COMANDA").size(1, 1).bold(false);
-  enc.line("COCINA");
+  enc.line((data.stationName || "COCINA").toUpperCase());
   enc.separator("=", paperWidth);
   enc.align("left").bold(true).line(data.tableLabel).bold(false);
   enc.line(`Mesero: ${data.waiterName}`);
