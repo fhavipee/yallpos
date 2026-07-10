@@ -3,6 +3,9 @@
 Despliegue en **Docker** para un servidor en la red del local (Mac mini, PC Linux o NUC).  
 Un solo puerto (**8080**) sirve web + API (nginx hace proxy de `/v1/`).
 
+**Servidor gratuito permanente en la nube (Oracle + actualizaciones desde GitHub):**  
+ver [DEPLOY-ORACLE-CLOUD.md](./DEPLOY-ORACLE-CLOUD.md).
+
 ---
 
 ## Requisitos
@@ -76,6 +79,9 @@ docker compose -f docker-compose.prod.yml --env-file .env.production down
 # Actualizar tras cambios de código
 docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+
+# O, en servidor con git clone:
+./scripts/update-production.sh
 ```
 
 ---

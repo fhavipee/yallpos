@@ -6,7 +6,13 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 ENV_FILE=".env.production"
-COMPOSE="docker compose -f docker-compose.prod.yml --env-file $ENV_FILE"
+COMPOSE_BASE="${COMPOSE_FILE:-docker-compose.prod.yml}"
+COMPOSE_ARGS=""
+IFS=':' read -ra FILES <<< "$COMPOSE_BASE"
+for f in "${FILES[@]}"; do
+  COMPOSE_ARGS="$COMPOSE_ARGS -f $f"
+done
+COMPOSE="docker compose $COMPOSE_ARGS --env-file $ENV_FILE"
 
 if [ ! -f "$ENV_FILE" ]; then
   cp .env.production.example "$ENV_FILE"

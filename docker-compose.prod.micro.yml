@@ -1,0 +1,26 @@
+# YallPos — VM pequeña (Oracle E2.1.Micro ~1 GB RAM)
+# Uso: COMPOSE_FILE=docker-compose.prod.yml:docker-compose.prod.micro.yml ./scripts/deploy.sh
+# O: ./scripts/deploy-micro.sh
+
+services:
+  postgres:
+    command: postgres -c shared_buffers=64MB -c max_connections=40 -c work_mem=4MB
+    deploy:
+      resources:
+        limits:
+          memory: 320M
+
+  api:
+    deploy:
+      resources:
+        limits:
+          memory: 384M
+
+  web:
+    deploy:
+      resources:
+        limits:
+          memory: 96M
+
+  redis:
+    profiles: ["unused"]
