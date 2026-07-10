@@ -269,46 +269,40 @@ export default function App() {
           ))}
         </select>
 
-        <nav className="yall-app-nav yall-hide-mobile">
-          {(canViewCash(user) || canViewFloor(user)) && (
-            <>
-              <NavBtn active={tab === "counter"} onClick={() => setTab("counter")} dark={dark}>Mostrador</NavBtn>
-              <NavBtn active={tab === "pickup-board"} onClick={() => setTab("pickup-board")} dark={dark}>Retiro</NavBtn>
-            </>
-          )}
-          {isRestaurant && canViewFloor(user) && (
-            <>
-              <NavBtn active={tab === "tables"} onClick={() => setTab("tables")} dark={dark}>Mesas</NavBtn>
-              <NavBtn active={tab === "order"} onClick={() => setTab("order")} dark={dark}>Comanda</NavBtn>
-              <NavBtn active={tab === "host"} onClick={() => setTab("host")} dark={dark}>Host</NavBtn>
-              {canViewFloor(user) && (
-                <>
-                  <NavBtn active={tab === "menu"} onClick={() => setTab("menu")} dark={dark}>Menú</NavBtn>
-                  <NavBtn active={tab === "training"} onClick={() => setTab("training")} dark={dark}>Capacitación</NavBtn>
-                </>
-              )}
-            </>
-          )}
-          {canViewKds(user) && (
-            <NavBtn active={tab === "kds"} onClick={() => setTab("kds")} dark={dark}>KDS</NavBtn>
-          )}
-          {canViewDashboard(user) && (
-            <NavBtn active={tab === "dashboard"} onClick={() => setTab("dashboard")} dark={dark}>Dashboard</NavBtn>
-          )}
-          <NavBtn active={tab === "pilot"} onClick={() => setTab("pilot")} dark={dark}>Piloto</NavBtn>
-          {canViewSettings(user) && (
-            <NavBtn active={tab === "settings"} onClick={() => setTab("settings")} dark={dark}>Config</NavBtn>
-          )}
-          {canAccessAdmin(user) && (
-            <NavBtn active={tab === "admin"} onClick={() => setTab("admin")} dark={dark}>Admin</NavBtn>
-          )}
-          <NavBtn active={tab === "onboarding"} onClick={() => setTab("onboarding")} dark={dark}>+ Negocio</NavBtn>
+        <nav className="yall-app-nav yall-hide-mobile" aria-label="Navegación principal">
+          <div className="yall-app-nav__track">
+            {bottomNavItems.map((item) => (
+              <NavBtn
+                key={item.id}
+                active={tab === item.id}
+                dimmed={item.disabled}
+                onClick={() => {
+                  setMoreOpen(false);
+                  if (item.disabled) {
+                    if (item.id === "order") alert("Primero abre una mesa");
+                    return;
+                  }
+                  setTab(item.id);
+                }}
+              >
+                {item.label}
+              </NavBtn>
+            ))}
+            {moreItems.length > 0 && (
+              <NavBtn
+                active={moreItems.some((i) => i.id === tab)}
+                onClick={() => setMoreOpen(true)}
+              >
+                Más ▾
+              </NavBtn>
+            )}
+          </div>
         </nav>
 
         <div className="yall-app-actions">
-          <span className="yall-hide-mobile" style={{ fontSize: 13, color: "var(--t-muted)" }}>{user.name}</span>
-          <button onClick={toggleDark} className="yall-touch-btn" style={{ ...iconBtn, borderColor: "var(--t-border-strong)", color: "var(--t-fg)" }}>{dark ? "☀️" : "🌙"}</button>
-          <button onClick={logout} className="yall-touch-btn" style={{ ...iconBtn, borderColor: "var(--t-border-strong)", color: "var(--t-fg)" }} title="Salir">⎋</button>
+          <span className="yall-hide-mobile yall-app-user">{user.name}</span>
+          <button onClick={toggleDark} className="yall-icon-btn" title={dark ? "Modo claro" : "Modo oscuro"}>{dark ? "☀️" : "🌙"}</button>
+          <button onClick={logout} className="yall-icon-btn" title="Salir">⎋</button>
         </div>
       </header>
 
@@ -377,16 +371,18 @@ export default function App() {
         {tab === "onboarding" && <Onboarding onComplete={handleOnboardingComplete} />}
       </main>
 
-      {isTablet && user && (
+      {user && (
         <>
-          <MobileBottomNav
-            tab={tab}
-            setTab={setTab}
-            user={user}
-            isRestaurant={isRestaurant}
-            hasTableSession={!!tableSessionId}
-            onMore={() => setMoreOpen(true)}
-          />
+          {isTablet && (
+            <MobileBottomNav
+              tab={tab}
+              setTab={setTab}
+              user={user}
+              isRestaurant={isRestaurant}
+              hasTableSession={!!tableSessionId}
+              onMore={() => setMoreOpen(true)}
+            />
+          )}
           <MobileMoreSheet
             open={moreOpen}
             onClose={() => setMoreOpen(false)}
@@ -400,21 +396,25 @@ export default function App() {
   );
 }
 
-function NavBtn({ active, onClick, dark, children }: { active: boolean; onClick: () => void; dark: boolean; children: React.ReactNode }) {
+function NavBtn({
+  active,
+  onClick,
+  children,
+  dimmed,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+  dimmed?: boolean;
+}) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className="yall-touch-btn"
-      style={{
-        padding: "5px 12px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 13,
-        background: active ? "var(--t-primary)" : "transparent",
-        color: active ? "var(--t-primary-fg)" : "var(--t-muted)",
-        fontWeight: active ? 600 : 400,
-      }}
+      className={`yall-nav-pill${active ? " yall-nav-pill--active" : ""}${dimmed ? " yall-nav-pill--dimmed" : ""}`}
+      aria-current={active ? "page" : undefined}
     >
       {children}
     </button>
   );
 }
-
-const iconBtn: React.CSSProperties = { padding: "6px 10px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "transparent", cursor: "pointer" };

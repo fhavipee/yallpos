@@ -36,7 +36,7 @@ export default function MobileMoreSheet({ open, onClose, items, onSelect, userNa
                 onClose();
               }}
             >
-              {item.label}
+              <span className="yall-more-sheet__item-label">{item.label}</span>
             </button>
           ))}
         </div>
