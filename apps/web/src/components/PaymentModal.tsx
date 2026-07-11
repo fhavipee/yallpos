@@ -1,19 +1,76 @@
-import { useState } from "react";
-import { formatCOP } from "../lib/api";
+import { useEffect, useState } from "react";
+import { api, formatCOP } from "../lib/api";
 
 type PaymentMethod = "cash" | "card" | "transfer" | "qr";
+
+export type PayCustomerPayload = {
+  docType: "CC" | "NIT" | "CE" | "PA" | "TI" | "RC" | "DIE";
+  docNumber: string;
+  dv?: string;
+  name: string;
+  email: string;
+  phone?: string;
+  address: string;
+  city: string;
+  department?: string;
+};
+
+export type PayConfirmData = {
+  payments: { method: PaymentMethod; amount: string }[];
+  tipAmount: string;
+  requiresNamedBuyer: boolean;
+  customerId?: string;
+  customer?: PayCustomerPayload;
+  applyLoyaltyDiscount?: boolean;
+};
+
+type CustomerHit = {
+  id: string;
+  docType: string;
+  docNumber?: string | null;
+  dv?: string | null;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  department?: string | null;
+  loyaltyEnabled?: boolean;
+  loyaltyPoints?: number;
+  loyaltyTier?: string | null;
+  discountPercent?: number | string;
+};
 
 type Props = {
   total: number;
   linesTotal?: number;
   invoiceDiscount?: number;
   onOpenDiscount?: () => void;
-  onConfirm: (data: {
-    payments: { method: PaymentMethod; amount: string }[];
-    tipAmount: string;
-  }) => void;
+  onConfirm: (data: PayConfirmData) => void;
   onClose: () => void;
 };
+
+const DOC_TYPES = [
+  { value: "CC", label: "Cédula (CC)" },
+  { value: "NIT", label: "NIT" },
+  { value: "CE", label: "Cédula extranjería" },
+  { value: "PA", label: "Pasaporte" },
+  { value: "TI", label: "Tarjeta identidad" },
+  { value: "RC", label: "Registro civil" },
+  { value: "DIE", label: "Doc. extranjero" },
+] as const;
+
+const emptyForm = (): PayCustomerPayload => ({
+  docType: "CC",
+  docNumber: "",
+  dv: "",
+  name: "",
+  email: "",
+  phone: "",
+  address: "",
+  city: "",
+  department: "",
+});
 
 export default function PaymentModal({
   total,
@@ -31,6 +88,15 @@ export default function PaymentModal({
   const [cashReceived, setCashReceived] = useState(String(total));
   const [giveChange, setGiveChange] = useState(false);
 
+  const [namedBuyer, setNamedBuyer] = useState(false);
+  const [search, setSearch] = useState("");
+  const [hits, setHits] = useState<CustomerHit[]>([]);
+  const [selectedId, setSelectedId] = useState<string | undefined>();
+  const [form, setForm] = useState<PayCustomerPayload>(emptyForm);
+  const [applyLoyalty, setApplyLoyalty] = useState(true);
+  const [selectedLoyalty, setSelectedLoyalty] = useState<CustomerHit | null>(null);
+  const [searching, setSearching] = useState(false);
+
   const tipNum = Number(tip) || 0;
   const totalWithTip = total + tipNum;
   const cashReceivedNum = Number(cashReceived) || 0;
@@ -41,8 +107,76 @@ export default function PaymentModal({
   const change = cashExcess > 0 && giveChange ? cashExcess : 0;
 
   const tipPresets = [0, 0.1, 0.15, 0.2].map((p) => Math.round(total * p));
+  const loyaltyPct = Number(selectedLoyalty?.discountPercent ?? 0);
+
+  useEffect(() => {
+    if (!namedBuyer || search.trim().length < 2) {
+      setHits([]);
+      return;
+    }
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const r = await api.get("/v1/customers", { params: { q: search.trim(), take: 8 } });
+        if (!cancelled) setHits(r.data ?? []);
+      } catch {
+        if (!cancelled) setHits([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }, 280);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [search, namedBuyer]);
+
+  function pickCustomer(c: CustomerHit) {
+    setSelectedId(c.id);
+    setSelectedLoyalty(c);
+    setForm({
+      docType: (c.docType as PayCustomerPayload["docType"]) || "CC",
+      docNumber: c.docNumber ?? "",
+      dv: c.dv ?? "",
+      name: c.name,
+      email: c.email ?? "",
+      phone: c.phone ?? "",
+      address: c.address ?? "",
+      city: c.city ?? "",
+      department: c.department ?? "",
+    });
+    setHits([]);
+    setSearch(`${c.docType} ${c.docNumber ?? ""} · ${c.name}`);
+  }
+
+  function validateBuyer(): string | null {
+    if (!namedBuyer) return null;
+    if (!form.docNumber.trim()) return "Ingrese el documento del cliente";
+    if (!form.name.trim()) return "Ingrese nombre o razón social";
+    if (!form.email.trim()) return "Email obligatorio para factura electrónica";
+    if (!form.address.trim() || !form.city.trim()) return "Dirección y ciudad obligatorias";
+    return null;
+  }
+
+  function buildPayExtra(): Pick<
+    PayConfirmData,
+    "requiresNamedBuyer" | "customerId" | "customer" | "applyLoyaltyDiscount"
+  > {
+    if (!namedBuyer) {
+      return { requiresNamedBuyer: false };
+    }
+    return {
+      requiresNamedBuyer: true,
+      customerId: selectedId,
+      customer: form,
+      applyLoyaltyDiscount: applyLoyalty && loyaltyPct > 0,
+    };
+  }
 
   function confirmSingle() {
+    const err = validateBuyer();
+    if (err) return alert(err);
     if (method1 === "cash") {
       if (cashReceivedNum < totalWithTip) {
         alert("El efectivo recibido no cubre el total");
@@ -52,6 +186,7 @@ export default function PaymentModal({
       onConfirm({
         payments: [{ method: method1, amount: String(payAmount) }],
         tipAmount: String(finalTip),
+        ...buildPayExtra(),
       });
       return;
     }
@@ -59,10 +194,13 @@ export default function PaymentModal({
     onConfirm({
       payments: [{ method: method1, amount: String(totalWithTip) }],
       tipAmount: String(tipNum),
+      ...buildPayExtra(),
     });
   }
 
   function confirmSplit() {
+    const err = validateBuyer();
+    if (err) return alert(err);
     const a1 = Number(amount1) || 0;
     const a2 = totalWithTip - a1;
     if (a1 <= 0 || a2 <= 0) return alert("Montos inválidos para pago mixto");
@@ -72,6 +210,7 @@ export default function PaymentModal({
         { method: method2, amount: String(a2) },
       ],
       tipAmount: tip || "0",
+      ...buildPayExtra(),
     });
   }
 
@@ -80,7 +219,7 @@ export default function PaymentModal({
       position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex",
       alignItems: "center", justifyContent: "center", zIndex: 100,
     }}>
-      <div style={{ background: "var(--t-card)", color: "var(--t-fg)", borderRadius: 16, padding: 24, width: 400, maxWidth: "92vw", maxHeight: "90vh", overflow: "auto", border: "1px solid var(--t-border)" }}>
+      <div style={{ background: "var(--t-card)", color: "var(--t-fg)", borderRadius: 16, padding: 24, width: 440, maxWidth: "94vw", maxHeight: "92vh", overflow: "auto", border: "1px solid var(--t-border)" }}>
         <h3 style={{ margin: "0 0 8px", color: "var(--t-fg)" }}>Cobrar</h3>
         {invoiceDiscount > 0 && linesTotal != null && (
           <div style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 8 }}>
@@ -114,6 +253,188 @@ export default function PaymentModal({
             {invoiceDiscount > 0 ? "✏️ Editar descuento" : "🏷️ Aplicar descuento"}
           </button>
         )}
+
+        <div style={{
+          marginBottom: 16,
+          padding: 12,
+          borderRadius: 10,
+          border: "1px solid var(--t-border)",
+          background: "var(--t-card-alt)",
+        }}>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>¿Factura con datos del cliente?</div>
+          <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+              <input
+                type="radio"
+                checked={!namedBuyer}
+                onChange={() => {
+                  setNamedBuyer(false);
+                  setSelectedId(undefined);
+                  setSelectedLoyalty(null);
+                }}
+              />
+              <span>
+                No — <strong>Consumidor final</strong>
+                <span style={{ display: "block", color: "var(--t-muted)", fontSize: 12 }}>
+                  Documento equivalente POS sin datos nominados (DIAN 222…)
+                </span>
+              </span>
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
+              <input type="radio" checked={namedBuyer} onChange={() => setNamedBuyer(true)} />
+              <span>
+                Sí — factura electrónica / con NIT o cédula
+                <span style={{ display: "block", color: "var(--t-muted)", fontSize: 12 }}>
+                  Se solicitan datos exigidos por DIAN (doc, nombre, email, dirección)
+                </span>
+              </span>
+            </label>
+          </div>
+
+          {namedBuyer && (
+            <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
+              <label style={labelStyle}>
+                Buscar cliente (doc, nombre, teléfono)
+                <input
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setSelectedId(undefined);
+                  }}
+                  style={inputStyle}
+                  placeholder="Cédula, NIT o nombre…"
+                />
+              </label>
+              {searching && <div style={{ fontSize: 12, color: "var(--t-muted)" }}>Buscando…</div>}
+              {hits.length > 0 && (
+                <div style={{ border: "1px solid var(--t-border)", borderRadius: 8, maxHeight: 140, overflow: "auto" }}>
+                  {hits.map((h) => (
+                    <button
+                      key={h.id}
+                      type="button"
+                      onClick={() => pickCustomer(h)}
+                      style={{
+                        display: "block", width: "100%", textAlign: "left", padding: "8px 10px",
+                        border: "none", borderBottom: "1px solid var(--t-border)", background: "var(--t-card)",
+                        color: "var(--t-fg)", cursor: "pointer", fontSize: 13,
+                      }}
+                    >
+                      <strong>{h.name}</strong>
+                      <span style={{ color: "var(--t-muted)" }}> · {h.docType} {h.docNumber}</span>
+                      {h.loyaltyEnabled && (
+                        <span style={{ display: "block", fontSize: 11, color: "var(--t-success-fg)" }}>
+                          Fidelización: {h.loyaltyPoints ?? 0} pts
+                          {Number(h.discountPercent) > 0 ? ` · ${h.discountPercent}% dto` : ""}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1.2fr", gap: 8 }}>
+                <label style={labelStyle}>
+                  Tipo doc
+                  <select
+                    value={form.docType}
+                    onChange={(e) => setForm({ ...form, docType: e.target.value as PayCustomerPayload["docType"] })}
+                    style={inputStyle}
+                  >
+                    {DOC_TYPES.map((d) => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  Número
+                  <input
+                    value={form.docNumber}
+                    onChange={(e) => {
+                      setForm({ ...form, docNumber: e.target.value.replace(/\D/g, "") });
+                      setSelectedId(undefined);
+                    }}
+                    style={inputStyle}
+                  />
+                </label>
+              </div>
+              {form.docType === "NIT" && (
+                <label style={labelStyle}>
+                  DV
+                  <input
+                    value={form.dv ?? ""}
+                    onChange={(e) => setForm({ ...form, dv: e.target.value.replace(/\D/g, "").slice(0, 1) })}
+                    style={inputStyle}
+                    maxLength={1}
+                  />
+                </label>
+              )}
+              <label style={labelStyle}>
+                Nombre / razón social
+                <input
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  style={inputStyle}
+                />
+              </label>
+              <label style={labelStyle}>
+                Email (factura electrónica)
+                <input
+                  value={form.email}
+                  onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  style={inputStyle}
+                  type="email"
+                />
+              </label>
+              <label style={labelStyle}>
+                Teléfono
+                <input
+                  value={form.phone ?? ""}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                  style={inputStyle}
+                />
+              </label>
+              <label style={labelStyle}>
+                Dirección
+                <input
+                  value={form.address}
+                  onChange={(e) => setForm({ ...form, address: e.target.value })}
+                  style={inputStyle}
+                />
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <label style={labelStyle}>
+                  Ciudad
+                  <input
+                    value={form.city}
+                    onChange={(e) => setForm({ ...form, city: e.target.value })}
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={labelStyle}>
+                  Departamento
+                  <input
+                    value={form.department ?? ""}
+                    onChange={(e) => setForm({ ...form, department: e.target.value })}
+                    style={inputStyle}
+                  />
+                </label>
+              </div>
+
+              {selectedLoyalty?.loyaltyEnabled && (
+                <div style={{ fontSize: 12, padding: 8, borderRadius: 8, background: "var(--t-success-soft)", color: "var(--t-success-fg)" }}>
+                  Cliente fidelizado · {selectedLoyalty.loyaltyPoints ?? 0} pts
+                  {selectedLoyalty.loyaltyTier ? ` · ${selectedLoyalty.loyaltyTier}` : ""}
+                  {loyaltyPct > 0 && (
+                    <label style={{ display: "flex", gap: 8, marginTop: 6, cursor: "pointer" }}>
+                      <input type="checkbox" checked={applyLoyalty} onChange={(e) => setApplyLoyalty(e.target.checked)} />
+                      Aplicar descuento fidelización {loyaltyPct}%
+                    </label>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
           {tipPresets.map((p, i) => (
@@ -261,7 +582,7 @@ export default function PaymentModal({
   );
 }
 
-const labelStyle: React.CSSProperties = { display: "grid", gap: 6, fontSize: 14, marginBottom: 12, color: "var(--t-fg)" };
+const labelStyle: React.CSSProperties = { display: "grid", gap: 6, fontSize: 14, marginBottom: 0, color: "var(--t-fg)" };
 const inputStyle: React.CSSProperties = {
   padding: "10px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", flex: 1,
   background: "var(--t-input-bg)", color: "var(--t-input-fg)",

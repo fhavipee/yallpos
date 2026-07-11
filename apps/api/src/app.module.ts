@@ -14,6 +14,7 @@ import { PilotModule } from "./pilot/pilot.module";
 import { SettingsModule } from "./settings/settings.module";
 import { AdminModule } from "./admin/admin.module";
 import { KioskModule } from "./kiosk/kiosk.module";
+import { CustomersModule } from "./customers/customers.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -30,6 +31,7 @@ import { HealthController } from "./health.controller";
     SettingsModule,
     AdminModule,
     KioskModule,
+    CustomersModule,
     RestaurantModule,
     KdsModule,
     PosModule,

@@ -60,6 +60,7 @@ export const ADMIN_TAB_PERMISSIONS: Record<AdminTab, string[]> = {
   inventory: ["admin.access", "settings.manage"],
   operations: ["admin.access", "settings.manage"],
   payments: ["admin.access", "settings.manage"],
+  customers: ["admin.access", "settings.manage"],
   fiscal: ["admin.access", "fiscal.manage"],
   onboarding: ["admin.access"],
   audit: ["admin.access"],

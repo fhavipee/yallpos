@@ -681,7 +681,14 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     }
   }
 
-  async function handlePay(data: { payments: any[]; tipAmount: string }) {
+  async function handlePay(data: {
+    payments: any[];
+    tipAmount: string;
+    requiresNamedBuyer?: boolean;
+    customerId?: string;
+    customer?: any;
+    applyLoyaltyDiscount?: boolean;
+  }) {
     if (!invoice) return;
     if (saleMode === "delivery") {
       await saveDelivery();
@@ -695,7 +702,8 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     const notifyNote = pickupPhone && invoice.status === "sent_to_kitchen"
       ? "\n📱 Aviso al cliente cuando cocina marque listo."
       : "";
-    alert(`✅ Venta pagada\nDE POS: ${doc}\nImpresión: ${print.methods.join(", ") || "HTML"}${notifyNote}`);
+    const buyer = data.requiresNamedBuyer ? "cliente nominado" : "consumidor final";
+    alert(`✅ Venta pagada (${buyer})\nDE POS: ${doc}\nImpresión: ${print.methods.join(", ") || "HTML"}${notifyNote}`);
     await startSale(saleMode);
   }
 

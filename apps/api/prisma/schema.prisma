@@ -110,10 +110,16 @@ model Company {
   city           String?
   department     String?
   country        String           @default("CO")
+  /// Adquiriente por defecto cuando no piden factura con datos (Consumidor final DIAN)
+  defaultBuyerDocType   String @default("CC")
+  defaultBuyerDocNumber String @default("222222222222")
+  defaultBuyerName      String @default("Consumidor final")
+  defaultBuyerDv        String?
   createdAt      DateTime         @default(now())
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id])
   branches Branch[]
+  customers Customer[]
   fiscalResolutions FiscalResolution[]
   taxDefinitions  TaxDefinition[]
 
@@ -374,16 +380,43 @@ model StockMovement {
 model Customer {
   id         String  @id @default(uuid())
   companyId  String
-  docType    String  @default("CC") // CC, NIT, CE, PA
+  /// Tipo doc Colombia: CC | NIT | CE | PA | TI | RC | DIE
+  docType    String  @default("CC")
   docNumber  String?
+  /// Dígito de verificación (NIT)
+  dv         String?
+  /// Nombre o razón social (adquiriente DIAN)
   name       String
   email      String?
   phone      String?
   address    String?
+  city       String?
+  department String?
+  country    String  @default("CO")
+  /// Régimen / tipo contribuyente (informativo)
+  taxRegime  String?
+  /// Responsabilidades fiscales DIAN, ej. R-99-PN / O-13
+  fiscalResponsibilities String?
+  /// Cliente genérico de la empresa (consumidor final)
+  isGeneric  Boolean @default(false)
+  /// Fidelización
+  loyaltyEnabled  Boolean @default(false)
+  loyaltyPoints   Int     @default(0)
+  loyaltyTier     String?
+  /// Descuento fijo del cliente (% sobre subtotal), 0–100
+  discountPercent Decimal @default(0)
+  notes      String?
   isActive   Boolean @default(true)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  company  Company         @relation(fields: [companyId], references: [id])
+  invoices SalesInvoice[]
 
   @@index([companyId, docNumber])
+  @@index([companyId, phone])
+  @@index([companyId, name])
+  @@index([companyId, isGeneric])
 }
 
 // ─── Restaurant: Tables & Sessions ─────────────────────────────
@@ -545,6 +578,9 @@ model SalesInvoice {
   branchId  String
   sessionId String?
   customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  /// true = cliente pidió factura con datos (electrónica / nominada)
+  requiresNamedBuyer Boolean @default(false)
 
   invoiceNumber String?
   idempotencyKey String? @unique

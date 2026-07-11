@@ -262,8 +262,47 @@ export class AdminService {
         city: dto.city,
         department: dto.department,
         vertical: dto.vertical as BusinessVertical | undefined,
+        ...(dto.defaultBuyerDocType !== undefined
+          ? { defaultBuyerDocType: dto.defaultBuyerDocType }
+          : {}),
+        ...(dto.defaultBuyerDocNumber !== undefined
+          ? { defaultBuyerDocNumber: dto.defaultBuyerDocNumber }
+          : {}),
+        ...(dto.defaultBuyerName !== undefined ? { defaultBuyerName: dto.defaultBuyerName } : {}),
+        ...(dto.defaultBuyerDv !== undefined
+          ? { defaultBuyerDv: dto.defaultBuyerDv || null }
+          : {}),
       },
     });
+    if (
+      dto.defaultBuyerDocType !== undefined ||
+      dto.defaultBuyerDocNumber !== undefined ||
+      dto.defaultBuyerName !== undefined ||
+      dto.defaultBuyerDv !== undefined
+    ) {
+      const generic = await this.prisma.customer.findFirst({
+        where: { companyId: branch.companyId, isGeneric: true },
+      });
+      const genericData = {
+        docType: updated.defaultBuyerDocType,
+        docNumber: updated.defaultBuyerDocNumber,
+        name: updated.defaultBuyerName,
+        dv: updated.defaultBuyerDv,
+      };
+      if (generic) {
+        await this.prisma.customer.update({ where: { id: generic.id }, data: genericData });
+      } else {
+        await this.prisma.customer.create({
+          data: {
+            companyId: branch.companyId,
+            isGeneric: true,
+            ...genericData,
+            fiscalResponsibilities: "R-99-PN",
+            country: updated.country || "CO",
+          },
+        });
+      }
+    }
     await this.audit.log({ tenantId: user.tenantId, userId: user.id, action: "update", entity: "company", entityId: updated.id, branchId, payload: dto });
     return updated;
   }

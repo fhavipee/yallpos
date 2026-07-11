@@ -621,13 +621,21 @@ export default function Order({
     }
   }
 
-  async function handlePay(data: { payments: any[]; tipAmount: string }) {
+  async function handlePay(data: {
+    payments: any[];
+    tipAmount: string;
+    requiresNamedBuyer?: boolean;
+    customerId?: string;
+    customer?: any;
+    applyLoyaltyDiscount?: boolean;
+  }) {
     if (!invoice) return;
     const paidId = invoice.id;
     const res = await api.post(`/v1/pos/invoices/${paidId}/pay`, data);
     setShowPay(false);
     await printInvoiceReceipt(paidId);
-    alert(`✅ Cobrado\nComprobante: ${res.data.fiscalDocument?.fullNumber ?? "interno (piloto)"}`);
+    const buyer = data.requiresNamedBuyer ? "con datos del cliente" : "consumidor final";
+    alert(`✅ Cobrado (${buyer})\nComprobante: ${res.data.fiscalDocument?.fullNumber ?? "interno (piloto)"}`);
 
     try {
       const remaining = await api.get(`/v1/pos/table-sessions/${tableSessionId}/invoices`);

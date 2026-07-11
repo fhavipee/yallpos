@@ -8,9 +8,18 @@ import { TaxModule } from "../tax/tax.module";
 import { PrismaModule } from "../prisma/prisma.module";
 
 import { PrintModule } from "../print/print.module";
+import { CustomersModule } from "../customers/customers.module";
 
 @Module({
-  imports: [PrismaModule, KdsModule, FiscalModule, NotificationsModule, TaxModule, PrintModule],
+  imports: [
+    PrismaModule,
+    KdsModule,
+    FiscalModule,
+    NotificationsModule,
+    TaxModule,
+    PrintModule,
+    CustomersModule,
+  ],
   controllers: [PosController],
   providers: [PosService],
   exports: [PosService],

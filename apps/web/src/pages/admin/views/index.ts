@@ -17,6 +17,7 @@ import AdminInventoryView from "./AdminInventoryView";
 import AdminModifiersView from "./AdminModifiersView";
 import AdminOperationsView from "./AdminOperationsView";
 import AdminFiscalView from "./AdminFiscalView";
+import AdminCustomersView from "./AdminCustomersView";
 import AdminPaymentsView from "./AdminPaymentsView";
 import AdminOnboardingView from "./AdminOnboardingView";
 import AdminAuditView from "./AdminAuditView";
@@ -39,6 +40,7 @@ export const ADMIN_VIEWS: Record<AdminTab, ComponentType> = {
   modifiers: AdminModifiersView,
   operations: AdminOperationsView,
   fiscal: AdminFiscalView,
+  customers: AdminCustomersView,
   payments: AdminPaymentsView,
   onboarding: AdminOnboardingView,
   audit: AdminAuditView,

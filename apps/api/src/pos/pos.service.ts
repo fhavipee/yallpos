@@ -36,6 +36,7 @@ import {
 import { calcLineAmountsFromRates } from "../common/tax.util";
 import { TaxDefinitionService } from "../tax/tax-definition.service";
 import { ReceiptService } from "../print/receipt.service";
+import { CustomersService } from "../customers/customers.service";
 
 @Injectable()
 export class PosService {
@@ -46,6 +47,7 @@ export class PosService {
     private orderNotify: OrderNotifyService,
     private taxes: TaxDefinitionService,
     private receipts: ReceiptService,
+    private customers: CustomersService,
   ) {}
 
   private async getBranchNotificationSettings(branchId: string) {
@@ -1529,10 +1531,38 @@ export class PosService {
   }
 
   async pay(branchId: string, invoiceId: string, dto: PayInvoiceDto) {
-    const invoice = await this.getInvoice(branchId, invoiceId);
+    let invoice = await this.getInvoice(branchId, invoiceId);
     if (!invoice) throw new NotFoundException("Invoice not found");
     if (invoice.status === "paid") throw new BadRequestException("Already paid");
     if (invoice.lines.length === 0) throw new BadRequestException("Invoice has no lines");
+
+    // Adjuntar cliente / consumidor genérico antes de cobrar
+    if (dto.requiresNamedBuyer !== undefined || dto.customerId || dto.customer) {
+      const attached = await this.customers.attachToInvoice(branchId, invoiceId, {
+        requiresNamedBuyer: dto.requiresNamedBuyer ?? Boolean(dto.customerId || dto.customer),
+        customerId: dto.customerId,
+        customer: dto.customer,
+        applyLoyaltyDiscount: dto.applyLoyaltyDiscount,
+      });
+      if (
+        dto.applyLoyaltyDiscount &&
+        attached.suggestedDiscountPercent &&
+        attached.suggestedDiscountPercent > 0
+      ) {
+        await this.applyInvoiceDiscount(branchId, invoiceId, {
+          kind: "percent",
+          value: String(attached.suggestedDiscountPercent),
+          reason: "Descuento fidelización cliente",
+        });
+      }
+      invoice = await this.getInvoice(branchId, invoiceId);
+      if (!invoice) throw new NotFoundException("Invoice not found");
+    } else if (!invoice.customerId) {
+      // Asegura consumidor genérico en la venta
+      await this.customers.attachToInvoice(branchId, invoiceId, { requiresNamedBuyer: false });
+      invoice = await this.getInvoice(branchId, invoiceId);
+      if (!invoice) throw new NotFoundException("Invoice not found");
+    }
 
     const totalWithTip = Number(invoice.total) + Number(dto.tipAmount ?? 0);
     const totalPaid = dto.payments.reduce((sum, p) => sum + Number(p.amount), 0);
@@ -1567,7 +1597,12 @@ export class PosService {
           sessionId: invoice.sessionId ?? openSession.id,
           ...(pickupCode ? { pickupCode } : {}),
         },
-        include: { lines: { include: { modifiers: true } }, payments: true, fiscalDocuments: true },
+        include: {
+          lines: { include: { modifiers: true } },
+          payments: true,
+          fiscalDocuments: true,
+          customer: true,
+        },
       });
 
       await this.deductStock(tx, branchId, inv.lines);
@@ -1615,6 +1650,17 @@ export class PosService {
       // Venta pagada aunque falle emisión — queda en contingencia
     }
 
+    if (paidInvoice.inv.customerId) {
+      try {
+        await this.customers.addLoyaltyPoints(
+          paidInvoice.inv.customerId,
+          Number(paidInvoice.inv.total),
+        );
+      } catch {
+        // no bloquear cobro
+      }
+    }
+
     return { ...paidInvoice.inv, fiscalDocument: fiscalDoc };
   }
 
@@ -1625,6 +1671,7 @@ export class PosService {
         lines: { include: { modifiers: true } },
         payments: true,
         fiscalDocuments: true,
+        customer: true,
         tableSession: { include: { table: { include: { area: true } } } },
       },
     });

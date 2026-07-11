@@ -16,6 +16,7 @@ export type AdminTab =
   | "modifiers"
   | "operations"
   | "fiscal"
+  | "customers"
   | "payments"
   | "onboarding"
   | "audit";
@@ -66,6 +67,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     title: "Fiscal y sistema",
     tabs: [
+      { id: "customers", label: "Clientes", desc: "Adquirientes, genérico y fidelización" },
       { id: "fiscal", label: "Fiscal / DIAN", desc: "Certificado y resoluciones" },
       { id: "onboarding", label: "Onboarding", desc: "Plantillas y wizard" },
       { id: "audit", label: "Auditoría", desc: "Historial de cambios" },

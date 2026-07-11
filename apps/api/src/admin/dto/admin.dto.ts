@@ -181,4 +181,8 @@ export class UpdateCompanyAdminDto {
   @IsOptional() @IsString() city?: string;
   @IsOptional() @IsString() department?: string;
   @IsOptional() @IsIn(["restaurant", "bakery", "cafe", "minimarket", "retail"]) vertical?: string;
+  @IsOptional() @IsString() defaultBuyerDocType?: string;
+  @IsOptional() @IsString() defaultBuyerDocNumber?: string;
+  @IsOptional() @IsString() defaultBuyerName?: string;
+  @IsOptional() @IsString() defaultBuyerDv?: string;
 }

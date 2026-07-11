@@ -5,6 +5,7 @@ import { DianClient } from "./dian.client";
 import { DianXmlSigner } from "./dian-xml.signer";
 import { DianCertificateService } from "./dian-certificate.service";
 import { buildHabilitationChecklist, HabilitationChecklist } from "./habilitation-checklist";
+import { CustomersService } from "../customers/customers.service";
 import * as fs from "fs";
 
 @Injectable()
@@ -17,6 +18,7 @@ export class FiscalService {
     private dianClient: DianClient,
     private xmlSigner: DianXmlSigner,
     private certService: DianCertificateService,
+    private customers: CustomersService,
   ) {}
 
   getCertificateInfo() {
@@ -66,7 +68,7 @@ export class FiscalService {
   async issuePosEquivalent(companyId: string, invoiceId: string) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, companyId },
-      include: { lines: true, fiscalDocuments: true },
+      include: { lines: true, fiscalDocuments: true, customer: true },
     });
     if (!invoice) throw new BadRequestException("Venta no encontrada");
     if (invoice.status !== "paid") throw new BadRequestException("La venta debe estar pagada");
@@ -92,6 +94,17 @@ export class FiscalService {
     const tax = Number(invoice.tax) + Number(invoice.consumptionTax);
     const total = Number(invoice.total);
 
+    const buyer = this.customers.resolveBuyerForFiscal({
+      company: {
+        defaultBuyerDocType: company.defaultBuyerDocType,
+        defaultBuyerDocNumber: company.defaultBuyerDocNumber,
+        defaultBuyerName: company.defaultBuyerName,
+        defaultBuyerDv: company.defaultBuyerDv,
+      },
+      customer: invoice.customer,
+      requiresNamedBuyer: invoice.requiresNamedBuyer,
+    });
+
     const { xml, cude } = this.xmlBuilder.buildPosEquivalent({
       nit: company.nit,
       prefix: resolution.prefix,
@@ -101,6 +114,12 @@ export class FiscalService {
       subtotal,
       tax,
       total,
+      customerDoc: buyer.docNumber,
+      customerName: buyer.name,
+      customerDocTypeCode: buyer.docTypeCode,
+      customerEmail: buyer.email ?? undefined,
+      customerAddress: buyer.address ?? undefined,
+      customerCity: buyer.city ?? undefined,
       softwareId: process.env.FISCAL_SOFTWARE_ID ?? "YALLPOS",
       pin: process.env.FISCAL_SOFTWARE_PIN ?? "000000",
     });
@@ -142,6 +161,8 @@ export class FiscalService {
       status,
       dianResponse,
       lastError,
+      customerDoc: buyer.docNumber,
+      customerName: buyer.name,
     });
   }
 
@@ -244,6 +265,8 @@ export class FiscalService {
     status: "accepted" | "contingency" | "rejected";
     dianResponse: Record<string, unknown>;
     lastError: string | null;
+    customerDoc?: string;
+    customerName?: string;
   }) {
     return this.prisma.$transaction(async (tx) => {
       await tx.fiscalResolution.update({
@@ -266,6 +289,8 @@ export class FiscalService {
           subtotal: params.subtotal,
           tax: params.tax,
           total: params.total,
+          customerDoc: params.customerDoc ?? null,
+          customerName: params.customerName ?? null,
           dianResponse: params.dianResponse as any,
           lastError: params.lastError,
           acceptedAt: params.status === "accepted" ? new Date() : null,
