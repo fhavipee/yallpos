@@ -261,34 +261,28 @@ export default function PaymentModal({
           border: "1px solid var(--t-border)",
           background: "var(--t-card-alt)",
         }}>
-          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 8 }}>¿Factura con datos del cliente?</div>
-          <div style={{ display: "grid", gap: 6, fontSize: 13 }}>
-            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
-              <input
-                type="radio"
-                checked={!namedBuyer}
-                onChange={() => {
-                  setNamedBuyer(false);
-                  setSelectedId(undefined);
-                  setSelectedLoyalty(null);
-                }}
-              />
-              <span>
-                No — <strong>Consumidor final</strong>
-                <span style={{ display: "block", color: "var(--t-muted)", fontSize: 12 }}>
-                  Documento equivalente POS sin datos nominados (DIAN 222…)
-                </span>
-              </span>
-            </label>
-            <label style={{ display: "flex", gap: 8, alignItems: "flex-start", cursor: "pointer" }}>
-              <input type="radio" checked={namedBuyer} onChange={() => setNamedBuyer(true)} />
-              <span>
-                Sí — factura electrónica / con NIT o cédula
-                <span style={{ display: "block", color: "var(--t-muted)", fontSize: 12 }}>
-                  Se solicitan datos exigidos por DIAN (doc, nombre, email, dirección)
-                </span>
-              </span>
-            </label>
+          <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Tipo cliente</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => {
+                setNamedBuyer(false);
+                setSelectedId(undefined);
+                setSelectedLoyalty(null);
+              }}
+              style={clientTypeBtnStyle(!namedBuyer)}
+            >
+              <span style={{ fontSize: 28, lineHeight: 1 }} aria-hidden>👤</span>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>Consumidor final</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setNamedBuyer(true)}
+              style={clientTypeBtnStyle(namedBuyer)}
+            >
+              <span style={{ fontSize: 28, lineHeight: 1 }} aria-hidden>🧾</span>
+              <span style={{ fontWeight: 700, fontSize: 13 }}>Datos cliente</span>
+            </button>
           </div>
 
           {namedBuyer && (
@@ -587,3 +581,20 @@ const inputStyle: React.CSSProperties = {
   padding: "10px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", flex: 1,
   background: "var(--t-input-bg)", color: "var(--t-input-fg)",
 };
+
+function clientTypeBtnStyle(active: boolean): React.CSSProperties {
+  return {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    padding: "14px 10px",
+    borderRadius: 10,
+    border: active ? "2px solid #2563eb" : "1px solid var(--t-border)",
+    background: active ? "var(--t-accent-soft)" : "var(--t-card)",
+    color: "var(--t-fg)",
+    cursor: "pointer",
+    minHeight: 88,
+  };
+}
