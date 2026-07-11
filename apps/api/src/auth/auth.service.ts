@@ -5,6 +5,7 @@ import { AuthUser } from "./auth.types";
 import { PermissionsService } from "./permissions.service";
 import { buildTotpKeyUri, generateTotpSecret, verifyTotpCode } from "../common/totp.util";
 import { verifyPin } from "../common/pin.util";
+import * as QRCode from "qrcode";
 
 @Injectable()
 export class AuthService {
@@ -50,6 +51,11 @@ export class AuthService {
     }
     const secret = generateTotpSecret();
     const otpauthUrl = buildTotpKeyUri({ email: user.email, secret });
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl, {
+      width: 280,
+      margin: 2,
+      errorCorrectionLevel: "M",
+    });
     // Guarda secreto pendiente hasta confirmar con un código válido
     await this.prisma.user.update({
       where: { id: user.id },
@@ -58,9 +64,10 @@ export class AuthService {
     return {
       secret,
       otpauthUrl,
+      qrDataUrl,
       manualEntry: secret,
       issuer: "YallPos",
-      hint: "Escanea el otpauthUrl en Google Authenticator / Authy y confirma con el código de 6 dígitos",
+      hint: "Escanea el QR con Google Authenticator / Authy y confirma con el código de 6 dígitos",
     };
   }
 

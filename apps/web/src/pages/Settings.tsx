@@ -40,8 +40,12 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
     kitchenSendMode: "manual" as "manual" | "auto",
     requireApprovalVoidInvoice: true,
     requireApprovalVoidLine: true,
+    approvalMethod: "both" as "pin" | "totp" | "both",
   });
-  const [totpInfo, setTotpInfo] = useState<{ enabled: boolean; setup?: { secret: string; otpauthUrl: string } } | null>(null);
+  const [totpInfo, setTotpInfo] = useState<{
+    enabled: boolean;
+    setup?: { secret: string; otpauthUrl: string; qrDataUrl?: string };
+  } | null>(null);
 
   useEffect(() => {
     setBranchId(branchId);
@@ -76,6 +80,10 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
         kitchenSendMode: p.kitchenSendMode === "auto" ? "auto" : "manual",
         requireApprovalVoidInvoice: p.requireApprovalVoidInvoice !== false,
         requireApprovalVoidLine: p.requireApprovalVoidLine !== false,
+        approvalMethod:
+          p.approvalMethod === "pin" || p.approvalMethod === "totp" || p.approvalMethod === "both"
+            ? p.approvalMethod
+            : "both",
       });
     }).catch(() => {});
     api.get("/v1/restaurant/waiters").then((r) => setWaiters(r.data)).catch(() => {});
@@ -158,6 +166,7 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
         kitchenSendMode: pos.kitchenSendMode,
         requireApprovalVoidInvoice: pos.requireApprovalVoidInvoice,
         requireApprovalVoidLine: pos.requireApprovalVoidLine,
+        approvalMethod: pos.approvalMethod,
       },
     });
     flashSaved();
@@ -166,7 +175,14 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
   async function setupTotp() {
     try {
       const r = await api.get("/v1/auth/me/totp/setup");
-      setTotpInfo({ enabled: false, setup: { secret: r.data.secret, otpauthUrl: r.data.otpauthUrl } });
+      setTotpInfo({
+        enabled: false,
+        setup: {
+          secret: r.data.secret,
+          otpauthUrl: r.data.otpauthUrl,
+          qrDataUrl: r.data.qrDataUrl,
+        },
+      });
     } catch (err: any) {
       alert(err.response?.data?.message ?? "No se pudo iniciar autenticador");
     }
@@ -461,6 +477,30 @@ node index.js`}
           Requerir autorización para eliminar productos
         </label>
         <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 16, marginBottom: 8 }}>
+          Método de autorización
+        </p>
+        <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+          {([
+            { value: "pin" as const, label: "Solo PIN", desc: "Gerente autoriza con PIN (4–6 dígitos)" },
+            { value: "totp" as const, label: "Solo autenticador", desc: "Código de Google Authenticator / Authy" },
+            { value: "both" as const, label: "PIN o autenticador", desc: "El cajero elige al momento de autorizar" },
+          ]).map((opt) => (
+            <label key={opt.value} style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 14, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="approvalMethod"
+                checked={pos.approvalMethod === opt.value}
+                onChange={() => setPos({ ...pos, approvalMethod: opt.value })}
+                style={{ marginTop: 3 }}
+              />
+              <span>
+                <strong>{opt.label}</strong>
+                <span style={{ display: "block", fontSize: 12, color: "var(--t-muted)", marginTop: 2 }}>{opt.desc}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 16, marginBottom: 8 }}>
           Envío a cocina (comanda y mostrador)
         </p>
         <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
@@ -513,12 +553,33 @@ node index.js`}
             {!totpInfo?.setup ? (
               <button type="button" onClick={setupTotp} style={btnSave}>Configurar autenticador</button>
             ) : (
-              <div style={{ display: "grid", gap: 8 }}>
-                <p style={{ fontSize: 13 }}>
-                  Agrega esta clave en tu app: <code style={{ wordBreak: "break-all" }}>{totpInfo.setup.secret}</code>
+              <div style={{ display: "grid", gap: 12, justifyItems: "start" }}>
+                <p style={{ fontSize: 13, margin: 0 }}>
+                  Escanea este QR con Google Authenticator, Authy u otra app TOTP:
                 </p>
-                <p style={{ fontSize: 12, color: "var(--t-muted)", wordBreak: "break-all" }}>{totpInfo.setup.otpauthUrl}</p>
-                <button type="button" onClick={confirmTotp} style={btnSave}>Confirmar con código</button>
+                {totpInfo.setup.qrDataUrl ? (
+                  <img
+                    src={totpInfo.setup.qrDataUrl}
+                    alt="QR autenticador YallPos"
+                    width={220}
+                    height={220}
+                    style={{
+                      borderRadius: 12,
+                      border: "1px solid var(--t-border)",
+                      background: "#fff",
+                      padding: 8,
+                    }}
+                  />
+                ) : null}
+                <details>
+                  <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--t-muted)" }}>
+                    Ingreso manual (si no puedes escanear)
+                  </summary>
+                  <p style={{ fontSize: 13, marginTop: 8 }}>
+                    Clave: <code style={{ wordBreak: "break-all" }}>{totpInfo.setup.secret}</code>
+                  </p>
+                </details>
+                <button type="button" onClick={confirmTotp} style={btnSave}>Confirmar con código de 6 dígitos</button>
               </div>
             )}
           </>

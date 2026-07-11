@@ -105,6 +105,7 @@ export default function Order({
   const [kitchenSendMode, setKitchenSendMode] = useState<"manual" | "auto">("manual");
   const [requireApprovalVoidInvoice, setRequireApprovalVoidInvoice] = useState(true);
   const [requireApprovalVoidLine, setRequireApprovalVoidLine] = useState(true);
+  const [approvalMethod, setApprovalMethod] = useState<"pin" | "totp" | "both">("both");
   const [pinPrompt, setPinPrompt] = useState<{
     title: string;
     description: string;
@@ -128,6 +129,8 @@ export default function Order({
       setKitchenSendMode(res.data?.pos?.kitchenSendMode === "auto" ? "auto" : "manual");
       setRequireApprovalVoidInvoice(res.data?.pos?.requireApprovalVoidInvoice !== false);
       setRequireApprovalVoidLine(res.data?.pos?.requireApprovalVoidLine !== false);
+      const am = res.data?.pos?.approvalMethod;
+      setApprovalMethod(am === "pin" || am === "totp" || am === "both" ? am : "both");
     }).catch(() => {});
   }, [branchId]);
 
@@ -715,6 +718,7 @@ export default function Order({
           title={pinPrompt.title}
           description={pinPrompt.description}
           confirmLabel="Autorizar"
+          approvalMethod={approvalMethod}
           onCancel={() => {
             if (!pinBusy) setPinPrompt(null);
           }}

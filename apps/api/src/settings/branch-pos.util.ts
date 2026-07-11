@@ -14,6 +14,7 @@ export type BranchPosSettings = {
   kitchenSendMode: KitchenSendMode;
   requireApprovalVoidInvoice: boolean;
   requireApprovalVoidLine: boolean;
+  approvalMethod: "pin" | "totp" | "both";
 };
 
 export async function readBranchPosSettings(

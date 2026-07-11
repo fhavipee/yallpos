@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 export type ApprovalMethod = "pin" | "totp";
+export type ApprovalMethodMode = "pin" | "totp" | "both";
 
 type Props = {
   open: boolean;
@@ -8,12 +9,11 @@ type Props = {
   description?: string;
   confirmLabel?: string;
   onCancel: () => void;
-  /** method + code (PIN 4-6 o TOTP 6) */
   onSubmit: (payload: { approvalPin?: string; approvalTotp?: string }) => void | Promise<void>;
   error?: string | null;
   busy?: boolean;
-  /** Por defecto permite ambas */
-  allowTotp?: boolean;
+  /** pin | totp | both — controla qué opciones se muestran */
+  approvalMethod?: ApprovalMethodMode;
 };
 
 export default function ApprovalPromptModal({
@@ -25,31 +25,39 @@ export default function ApprovalPromptModal({
   onSubmit,
   error,
   busy,
-  allowTotp = true,
+  approvalMethod = "both",
 }: Props) {
-  const [method, setMethod] = useState<ApprovalMethod>("pin");
+  const allowPin = approvalMethod === "pin" || approvalMethod === "both";
+  const allowTotp = approvalMethod === "totp" || approvalMethod === "both";
+  const defaultMethod: ApprovalMethod = allowPin ? "pin" : "totp";
+
+  const [method, setMethod] = useState<ApprovalMethod>(defaultMethod);
   const [code, setCode] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!open) {
       setCode("");
-      setMethod("pin");
+      setMethod(defaultMethod);
       return;
     }
+    setMethod(defaultMethod);
     const t = window.setTimeout(() => inputRef.current?.focus(), 50);
     return () => window.clearTimeout(t);
-  }, [open, method]);
+  }, [open, defaultMethod]);
 
   if (!open) return null;
 
-  const minLen = method === "pin" ? 4 : 6;
-  const maxLen = method === "pin" ? 6 : 6;
+  const activeMethod: ApprovalMethod =
+    method === "pin" && !allowPin ? "totp" : method === "totp" && !allowTotp ? "pin" : method;
+  const minLen = activeMethod === "pin" ? 4 : 6;
+  const maxLen = 6;
+  const showTabs = allowPin && allowTotp;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (code.length < minLen || busy) return;
-    if (method === "pin") {
+    if (activeMethod === "pin") {
       await onSubmit({ approvalPin: code });
     } else {
       await onSubmit({ approvalTotp: code });
@@ -66,23 +74,29 @@ export default function ApprovalPromptModal({
         <h3 className="yall-pin-modal__title">{title}</h3>
         {description && <p className="yall-pin-modal__desc">{description}</p>}
 
-        {allowTotp && (
+        {showTabs && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
             <button
               type="button"
               onClick={() => { setMethod("pin"); setCode(""); }}
-              style={tabStyle(method === "pin")}
+              style={tabStyle(activeMethod === "pin")}
             >
               PIN gerente
             </button>
             <button
               type="button"
               onClick={() => { setMethod("totp"); setCode(""); }}
-              style={tabStyle(method === "totp")}
+              style={tabStyle(activeMethod === "totp")}
             >
               Autenticador
             </button>
           </div>
+        )}
+
+        {!showTabs && (
+          <p style={{ fontSize: 13, fontWeight: 600, margin: "0 0 10px", color: "var(--t-fg)" }}>
+            {activeMethod === "pin" ? "PIN de gerente" : "Código del autenticador"}
+          </p>
         )}
 
         <input
@@ -95,11 +109,11 @@ export default function ApprovalPromptModal({
           maxLength={maxLen}
           value={code}
           onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, maxLen))}
-          placeholder={method === "pin" ? "••••" : "000000"}
-          aria-label={method === "pin" ? "PIN" : "Código autenticador"}
+          placeholder={activeMethod === "pin" ? "••••" : "000000"}
+          aria-label={activeMethod === "pin" ? "PIN" : "Código autenticador"}
         />
         <p style={{ fontSize: 12, color: "var(--t-muted)", margin: "8px 0 0" }}>
-          {method === "pin"
+          {activeMethod === "pin"
             ? "PIN de gerente, dueño o administrador kiosk (4–6 dígitos)"
             : "Código de 6 dígitos de Google Authenticator / Authy"}
         </p>

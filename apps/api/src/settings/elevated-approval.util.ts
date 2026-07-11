@@ -3,16 +3,14 @@ import { PrismaService } from "../prisma/prisma.service";
 import { KioskSettings, verifyAdminPin, verifyPin } from "../common/pin.util";
 import { verifyTotpCode } from "../common/totp.util";
 
-export type ApprovalAction =
-  | "discount"
-  | "void_invoice"
-  | "void_line"
-  | "courtesy";
+export type ApprovalMethodMode = "pin" | "totp" | "both";
 
 export type BranchApprovalPolicy = {
   maxDiscountPercentWithoutPin: number;
   requireApprovalVoidInvoice: boolean;
   requireApprovalVoidLine: boolean;
+  /** Qué métodos de autorización están habilitados en caja */
+  approvalMethod: ApprovalMethodMode;
 };
 
 export type ElevatedApprovalInput = {
@@ -25,6 +23,11 @@ export type ElevatedApprovalResult = {
   method: "pin" | "totp" | "kiosk_admin";
   approverUserId?: string;
 };
+
+function parseApprovalMethod(raw: unknown): ApprovalMethodMode {
+  if (raw === "pin" || raw === "totp" || raw === "both") return raw;
+  return "both";
+}
 
 async function readKiosk(prisma: PrismaService, branchId: string): Promise<KioskSettings> {
   const branch = await prisma.branch.findUnique({
@@ -51,6 +54,7 @@ export async function readBranchApprovalPolicy(
       maxDiscountPercentWithoutPin: 10,
       requireApprovalVoidInvoice: true,
       requireApprovalVoidLine: true,
+      approvalMethod: "both",
     };
   }
 
@@ -65,6 +69,7 @@ export async function readBranchApprovalPolicy(
       Number.isFinite(max) && max >= 0 && max <= 100 ? max : 10,
     requireApprovalVoidInvoice: pos.requireApprovalVoidInvoice !== false,
     requireApprovalVoidLine: pos.requireApprovalVoidLine !== false,
+    approvalMethod: parseApprovalMethod(pos.approvalMethod),
   };
 }
 
@@ -74,13 +79,24 @@ export async function verifyElevatedApproval(
   tenantId: string,
   input: ElevatedApprovalInput,
 ): Promise<ElevatedApprovalResult> {
-  const pin = input.approvalPin?.trim();
-  const totp = input.approvalTotp?.trim();
+  const policy = await readBranchApprovalPolicy(prisma, branchId);
+  const allowPin = policy.approvalMethod === "pin" || policy.approvalMethod === "both";
+  const allowTotp = policy.approvalMethod === "totp" || policy.approvalMethod === "both";
+
+  const pin = allowPin ? input.approvalPin?.trim() : undefined;
+  const totp = allowTotp ? input.approvalTotp?.trim() : undefined;
 
   if (!pin && !totp) {
+    const msg =
+      policy.approvalMethod === "pin"
+        ? "Se requiere PIN de gerente"
+        : policy.approvalMethod === "totp"
+          ? "Se requiere código del autenticador"
+          : "Se requiere PIN de gerente o código del autenticador";
     throw new ForbiddenException({
       code: "APPROVAL_REQUIRED",
-      message: "Se requiere PIN de gerente o código del autenticador",
+      message: msg,
+      approvalMethod: policy.approvalMethod,
     });
   }
 
@@ -141,7 +157,12 @@ export async function verifyElevatedApproval(
 
   throw new UnauthorizedException({
     code: "APPROVAL_INVALID",
-    message: "PIN o código de autenticador incorrecto",
+    message:
+      policy.approvalMethod === "totp"
+        ? "Código de autenticador incorrecto"
+        : policy.approvalMethod === "pin"
+          ? "PIN de autorización incorrecto"
+          : "PIN o código de autenticador incorrecto",
   });
 }
 

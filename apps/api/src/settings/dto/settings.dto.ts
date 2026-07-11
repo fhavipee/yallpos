@@ -62,5 +62,7 @@ export class UpdateBranchSettingsDto {
     kitchenSendMode?: "manual" | "auto";
     requireApprovalVoidInvoice?: boolean;
     requireApprovalVoidLine?: boolean;
+    /** pin = solo PIN · totp = solo autenticador · both = cualquiera */
+    approvalMethod?: "pin" | "totp" | "both";
   };
 }
