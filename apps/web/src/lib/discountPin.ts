@@ -9,8 +9,19 @@ export function needsDiscountPin(discountPercent: number, maxWithoutPin: number)
 }
 
 export function isApprovalRequiredError(err: unknown): boolean {
-  const data = (err as { response?: { data?: { code?: string } } })?.response?.data;
-  return data?.code === "APPROVAL_REQUIRED" || data?.code === "DISCOUNT_PIN_REQUIRED";
+  const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
+  if (!data) return false;
+  const nested = data.message;
+  const code =
+    (typeof data.code === "string" && data.code) ||
+    (nested && typeof nested === "object" && typeof (nested as { code?: string }).code === "string"
+      ? (nested as { code: string }).code
+      : undefined);
+  return (
+    code === "APPROVAL_REQUIRED" ||
+    code === "DISCOUNT_PIN_REQUIRED" ||
+    code === "APPROVAL_INVALID"
+  );
 }
 
 /** @deprecated alias */
@@ -19,8 +30,15 @@ export function isDiscountPinRequiredError(err: unknown): boolean {
 }
 
 export function approvalErrorMessage(err: unknown, fallback: string): string {
-  const data = (err as { response?: { data?: { message?: string } } })?.response?.data;
-  return typeof data?.message === "string" ? data.message : fallback;
+  const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data;
+  if (!data) return fallback;
+  if (typeof data.message === "string") return data.message;
+  if (data.message && typeof data.message === "object") {
+    const nested = (data.message as { message?: unknown }).message;
+    if (typeof nested === "string") return nested;
+  }
+  if (Array.isArray(data.message)) return data.message.join(", ");
+  return fallback;
 }
 
 /** @deprecated alias */

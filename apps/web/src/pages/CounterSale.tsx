@@ -719,6 +719,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       });
       setInvoice(res.data);
     } catch (err: unknown) {
+      if (codes) throw err;
       alert(approvalErrorMessage(err, "No se pudo aplicar la cortesía"));
     } finally {
       setApplyingCourtesyId(null);

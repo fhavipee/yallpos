@@ -541,21 +541,22 @@ node index.js`}
       <section style={sectionStyle}>
         <h3>Autenticador (gerente)</h3>
         <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 0 }}>
-          Google Authenticator / Authy para autorizar descuentos, anulaciones y eliminaciones sin compartir PIN.
+          Solo usuarios <strong>gerente</strong> o <strong>propietario</strong>. Pasos: 1) Generar QR 2) Escanear en la app
+          3) Confirmar con el código de 6 dígitos. Sin el paso 3 no autorizará ventas.
         </p>
         {totpInfo?.enabled ? (
           <>
-            <p style={{ color: "var(--t-success-fg)", fontWeight: 600 }}>Autenticador activo</p>
+            <p style={{ color: "var(--t-success-fg)", fontWeight: 600 }}>✓ Autenticador activo — listo para autorizar</p>
             <button type="button" onClick={disableTotp} style={btnOutline}>Desactivar</button>
           </>
         ) : (
           <>
             {!totpInfo?.setup ? (
-              <button type="button" onClick={setupTotp} style={btnSave}>Configurar autenticador</button>
+              <button type="button" onClick={setupTotp} style={btnSave}>1. Generar QR</button>
             ) : (
               <div style={{ display: "grid", gap: 12, justifyItems: "start" }}>
-                <p style={{ fontSize: 13, margin: 0 }}>
-                  Escanea este QR con Google Authenticator, Authy u otra app TOTP:
+                <p style={{ fontSize: 13, margin: 0, fontWeight: 600 }}>
+                  2. Escanea este QR (Google Authenticator, Authy, Microsoft Authenticator)
                 </p>
                 {totpInfo.setup.qrDataUrl ? (
                   <img
@@ -579,7 +580,10 @@ node index.js`}
                     Clave: <code style={{ wordBreak: "break-all" }}>{totpInfo.setup.secret}</code>
                   </p>
                 </details>
-                <button type="button" onClick={confirmTotp} style={btnSave}>Confirmar con código de 6 dígitos</button>
+                <p style={{ fontSize: 12, color: "var(--t-muted)", margin: 0 }}>
+                  Si generas otro QR, borra la cuenta anterior en tu app e inicia de nuevo.
+                </p>
+                <button type="button" onClick={confirmTotp} style={btnSave}>3. Confirmar con código de 6 dígitos</button>
               </div>
             )}
           </>

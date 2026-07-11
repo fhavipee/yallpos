@@ -1,4 +1,4 @@
-import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, HttpException, HttpStatus, UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { KioskSettings, verifyAdminPin, verifyPin } from "../common/pin.util";
 import { verifyTotpCode } from "../common/totp.util";
@@ -148,22 +148,43 @@ export async function verifyElevatedApproval(
       },
       select: { id: true, name: true, totpSecret: true },
     });
+    if (users.length === 0) {
+      throw new HttpException(
+        {
+          code: "APPROVAL_INVALID",
+          message:
+            "Ningún gerente tiene el autenticador activo. En Ajustes → Autenticador: genera el QR, escanea, y pulsa Confirmar con el código de 6 dígitos.",
+        },
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
     for (const row of users) {
       if (verifyTotpCode(totp, row.totpSecret)) {
         return { approverName: row.name, method: "totp", approverUserId: row.id };
       }
     }
+    throw new HttpException(
+      {
+        code: "APPROVAL_INVALID",
+        message:
+          "Código de autenticador incorrecto o vencido. Usa el código actual (cambia cada 30s). Si regeneraste el QR, elimina la cuenta vieja en la app y vuelve a escanear.",
+      },
+      HttpStatus.UNAUTHORIZED,
+    );
   }
 
-  throw new UnauthorizedException({
-    code: "APPROVAL_INVALID",
-    message:
-      policy.approvalMethod === "totp"
-        ? "Código de autenticador incorrecto"
-        : policy.approvalMethod === "pin"
-          ? "PIN de autorización incorrecto"
-          : "PIN o código de autenticador incorrecto",
-  });
+  throw new HttpException(
+    {
+      code: "APPROVAL_INVALID",
+      message:
+        policy.approvalMethod === "totp"
+          ? "Código de autenticador incorrecto"
+          : policy.approvalMethod === "pin"
+            ? "PIN de autorización incorrecto"
+            : "PIN o código de autenticador incorrecto",
+    },
+    HttpStatus.UNAUTHORIZED,
+  );
 }
 
 export function discountPercentRequiresApproval(

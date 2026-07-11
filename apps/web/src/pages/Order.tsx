@@ -659,6 +659,7 @@ export default function Order({
       });
       await loadOrCreate();
     } catch (err: unknown) {
+      if (codes) throw err;
       alert(approvalErrorMessage(err, "No se pudo aplicar la cortesía"));
     } finally {
       setApplyingCourtesyId(null);
