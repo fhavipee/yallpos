@@ -38,7 +38,10 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
   const [pos, setPos] = useState({
     maxDiscountPercentWithoutPin: "10",
     kitchenSendMode: "manual" as "manual" | "auto",
+    requireApprovalVoidInvoice: true,
+    requireApprovalVoidLine: true,
   });
+  const [totpInfo, setTotpInfo] = useState<{ enabled: boolean; setup?: { secret: string; otpauthUrl: string } } | null>(null);
 
   useEffect(() => {
     setBranchId(branchId);
@@ -71,9 +74,14 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
       setPos({
         maxDiscountPercentWithoutPin: String(p.maxDiscountPercentWithoutPin ?? 10),
         kitchenSendMode: p.kitchenSendMode === "auto" ? "auto" : "manual",
+        requireApprovalVoidInvoice: p.requireApprovalVoidInvoice !== false,
+        requireApprovalVoidLine: p.requireApprovalVoidLine !== false,
       });
     }).catch(() => {});
     api.get("/v1/restaurant/waiters").then((r) => setWaiters(r.data)).catch(() => {});
+    api.get("/v1/auth/me").then((r) => {
+      setTotpInfo({ enabled: Boolean(r.data?.user?.totpEnabled) });
+    }).catch(() => setTotpInfo(null));
     refreshAgent();
   }, [branchId]);
 
@@ -148,9 +156,47 @@ export default function SettingsPage({ branchId }: { branchId: string }) {
       pos: {
         maxDiscountPercentWithoutPin: max,
         kitchenSendMode: pos.kitchenSendMode,
+        requireApprovalVoidInvoice: pos.requireApprovalVoidInvoice,
+        requireApprovalVoidLine: pos.requireApprovalVoidLine,
       },
     });
     flashSaved();
+  }
+
+  async function setupTotp() {
+    try {
+      const r = await api.get("/v1/auth/me/totp/setup");
+      setTotpInfo({ enabled: false, setup: { secret: r.data.secret, otpauthUrl: r.data.otpauthUrl } });
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "No se pudo iniciar autenticador");
+    }
+  }
+
+  async function confirmTotp() {
+    const code = window.prompt("Ingresa el código de 6 dígitos del autenticador");
+    if (!code?.trim()) return;
+    try {
+      await api.post("/v1/auth/me/totp/enable", {
+        code: code.trim(),
+        secret: totpInfo?.setup?.secret,
+      });
+      setTotpInfo({ enabled: true });
+      alert("Autenticador activado");
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "Código inválido");
+    }
+  }
+
+  async function disableTotp() {
+    const password = window.prompt("Contraseña para desactivar el autenticador");
+    if (!password) return;
+    try {
+      await api.delete("/v1/auth/me/totp", { data: { password } });
+      setTotpInfo({ enabled: false });
+      alert("Autenticador desactivado");
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "No se pudo desactivar");
+    }
   }
 
   async function saveKioskSettings() {
@@ -390,14 +436,30 @@ node index.js`}
       <section style={sectionStyle}>
         <h3>Punto de venta</h3>
         <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 0 }}>
-          Descuentos y cortesías por encima de este porcentaje requieren PIN de gerente, dueño o administrador.
+          Acciones sensibles: descuentos sobre el umbral, anular comanda y eliminar productos. Autorización con PIN de gerente o autenticador (TOTP).
         </p>
         <Field
-          label="Descuento máximo sin PIN (%)"
+          label="Descuento máximo sin autorización (%)"
           value={pos.maxDiscountPercentWithoutPin}
           onChange={(v) => setPos({ ...pos, maxDiscountPercentWithoutPin: v.replace(/[^\d.]/g, "").slice(0, 5) })}
           placeholder="10"
         />
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14, marginTop: 12, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={pos.requireApprovalVoidInvoice}
+            onChange={(e) => setPos({ ...pos, requireApprovalVoidInvoice: e.target.checked })}
+          />
+          Requerir autorización para anular comanda
+        </label>
+        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14, marginTop: 8, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={pos.requireApprovalVoidLine}
+            onChange={(e) => setPos({ ...pos, requireApprovalVoidLine: e.target.checked })}
+          />
+          Requerir autorización para eliminar productos
+        </label>
         <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 16, marginBottom: 8 }}>
           Envío a cocina (comanda y mostrador)
         </p>
@@ -434,6 +496,33 @@ node index.js`}
           </label>
         </div>
         <button onClick={savePosSettings} style={btnSave}>Guardar POS</button>
+      </section>
+
+      <section style={sectionStyle}>
+        <h3>Autenticador (gerente)</h3>
+        <p style={{ fontSize: 13, color: "var(--t-muted)", marginTop: 0 }}>
+          Google Authenticator / Authy para autorizar descuentos, anulaciones y eliminaciones sin compartir PIN.
+        </p>
+        {totpInfo?.enabled ? (
+          <>
+            <p style={{ color: "var(--t-success-fg)", fontWeight: 600 }}>Autenticador activo</p>
+            <button type="button" onClick={disableTotp} style={btnOutline}>Desactivar</button>
+          </>
+        ) : (
+          <>
+            {!totpInfo?.setup ? (
+              <button type="button" onClick={setupTotp} style={btnSave}>Configurar autenticador</button>
+            ) : (
+              <div style={{ display: "grid", gap: 8 }}>
+                <p style={{ fontSize: 13 }}>
+                  Agrega esta clave en tu app: <code style={{ wordBreak: "break-all" }}>{totpInfo.setup.secret}</code>
+                </p>
+                <p style={{ fontSize: 12, color: "var(--t-muted)", wordBreak: "break-all" }}>{totpInfo.setup.otpauthUrl}</p>
+                <button type="button" onClick={confirmTotp} style={btnSave}>Confirmar con código</button>
+              </div>
+            )}
+          </>
+        )}
       </section>
 
       <section style={sectionStyle}>

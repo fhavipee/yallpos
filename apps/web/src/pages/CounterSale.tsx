@@ -9,8 +9,8 @@ import InvoiceDiscountModal from "../components/InvoiceDiscountModal";
 import { ui, useTheme } from "../lib/theme";
 import { formatPickupDisplay, formatPickupLabel } from "../lib/pickupCode";
 import { LINE_VOIDED_EVENT, INVOICE_UPDATED_EVENT, type LineVoidedDetail, type InvoiceUpdatedDetail } from "../lib/kdsSocket";
-import { discountPercentFromAmount, discountPinErrorMessage, isDiscountPinRequiredError, needsDiscountPin } from "../lib/discountPin";
-import PinPromptModal from "../components/PinPromptModal";
+import { discountPercentFromAmount, approvalErrorMessage, isApprovalRequiredError, needsDiscountPin, type ApprovalCodes } from "../lib/discountPin";
+import ApprovalPromptModal from "../components/ApprovalPromptModal";
 
 type Product = {
   id: string;
@@ -146,10 +146,12 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   const [applyingCourtesyId, setApplyingCourtesyId] = useState<string | null>(null);
   const [maxDiscountWithoutPin, setMaxDiscountWithoutPin] = useState(10);
   const [kitchenSendMode, setKitchenSendMode] = useState<"manual" | "auto">("manual");
+  const [requireApprovalVoidInvoice, setRequireApprovalVoidInvoice] = useState(true);
+  const [requireApprovalVoidLine, setRequireApprovalVoidLine] = useState(true);
   const [pinPrompt, setPinPrompt] = useState<{
     title: string;
     description: string;
-    onSubmit: (pin: string) => Promise<void>;
+    onSubmit: (codes: ApprovalCodes) => Promise<void>;
   } | null>(null);
   const [pinError, setPinError] = useState<string | null>(null);
   const [pinBusy, setPinBusy] = useState(false);
@@ -241,6 +243,8 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       const max = Number(res.data?.pos?.maxDiscountPercentWithoutPin);
       setMaxDiscountWithoutPin(Number.isFinite(max) && max >= 0 && max <= 100 ? max : 10);
       setKitchenSendMode(res.data?.pos?.kitchenSendMode === "auto" ? "auto" : "manual");
+      setRequireApprovalVoidInvoice(res.data?.pos?.requireApprovalVoidInvoice !== false);
+      setRequireApprovalVoidLine(res.data?.pos?.requireApprovalVoidLine !== false);
     }).catch(() => {});
   }, [branchId]);
 
@@ -296,23 +300,23 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     return () => window.removeEventListener(INVOICE_UPDATED_EVENT, handler);
   }, [invoice?.id]);
 
-  function requestDiscountPin(title: string, description: string, action: (pin: string) => Promise<void>) {
+  function requestApproval(title: string, description: string, action: (codes: ApprovalCodes) => Promise<void>) {
     setPinError(null);
     setPinPrompt({
       title,
       description,
-      onSubmit: async (pin) => {
+      onSubmit: async (codes) => {
         setPinBusy(true);
         setPinError(null);
         try {
-          await action(pin);
+          await action(codes);
           setPinPrompt(null);
         } catch (err: unknown) {
-          if (isDiscountPinRequiredError(err) || (err as { response?: { status?: number } })?.response?.status === 401) {
-            setPinError(discountPinErrorMessage(err, "PIN incorrecto"));
+          if (isApprovalRequiredError(err) || (err as { response?: { status?: number } })?.response?.status === 401) {
+            setPinError(approvalErrorMessage(err, "Autorización incorrecta"));
           } else {
             setPinPrompt(null);
-            alert(discountPinErrorMessage(err, "No se pudo aplicar"));
+            alert(approvalErrorMessage(err, "No se pudo autorizar"));
           }
         } finally {
           setPinBusy(false);
@@ -430,23 +434,34 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     setInvoice(res.data);
   }
 
-  async function voidOpenOrder(order: OpenOrder) {
+  async function voidOpenOrder(order: OpenOrder, codes?: ApprovalCodes) {
     const isEmptyDraft =
       order.status === "draft"
       && Number(order.total ?? 0) === 0
       && (order.lines?.length ?? 0) === 0;
-    if (!isEmptyDraft) {
-      const label = order.deliveryName || order.pickupName || order.pickupCode || "este pedido";
-      const msg = order.status === "sent_to_kitchen"
-        ? `Anular "${label}"? Se cancelará en cocina y ya no aparecerá en pedidos abiertos.`
-        : `Anular "${label}"? Ya no aparecerá en pedidos abiertos.`;
-      if (!window.confirm(msg)) return;
+    if (!codes) {
+      if (!isEmptyDraft) {
+        const label = order.deliveryName || order.pickupName || order.pickupCode || "este pedido";
+        const msg = order.status === "sent_to_kitchen"
+          ? `Anular "${label}"? Se cancelará en cocina y ya no aparecerá en pedidos abiertos.`
+          : `Anular "${label}"? Ya no aparecerá en pedidos abiertos.`;
+        if (!window.confirm(msg)) return;
+      }
+      if (requireApprovalVoidInvoice) {
+        requestApproval(
+          "Autorizar anulación",
+          "Anular el pedido requiere PIN de gerente o código del autenticador.",
+          (c) => voidOpenOrder(order, c),
+        );
+        return;
+      }
     }
 
     setVoidingOrderId(order.id);
     try {
       const res = await api.post(`/v1/pos/invoices/${order.id}/void`, {
         reason: isEmptyDraft ? "Borrador vacío descartado" : "Anulado desde mostrador",
+        ...codes,
       });
       if (res.data.wasInKitchen) {
         await printKitchenVoidTicket(order.id);
@@ -456,7 +471,15 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       }
       await Promise.all([refreshOpenOrders(), refreshPickupQueue(), refreshDeliveryQueue()]);
     } catch (err: any) {
-      alert(err.response?.data?.message ?? "No se pudo anular el pedido");
+      if (isApprovalRequiredError(err) && !codes) {
+        requestApproval(
+          "Autorizar anulación",
+          approvalErrorMessage(err, "Se requiere autorización de gerente"),
+          (c) => voidOpenOrder(order, c),
+        );
+      } else {
+        alert(err.response?.data?.message ?? "No se pudo anular el pedido");
+      }
     } finally {
       setVoidingOrderId(null);
     }
@@ -484,25 +507,43 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     }
   }
 
-  async function removeLine(lineId: string, lineName?: string) {
+  async function removeLine(lineId: string, lineName?: string, codes?: ApprovalCodes) {
     if (!invoice) return;
-    const line = invoice.lines?.find((l: any) => l.id === lineId);
-    const alreadyInKitchen = inKitchen && line && !isLinePendingKitchen(line.kitchenStatus);
-    if (alreadyInKitchen) {
-      const ok = window.confirm(
-        `¿Anular "${lineName ?? "este producto"}" en cocina?\nSe quitará del pedido y se avisará al KDS.`,
-      );
-      if (!ok) return;
+    if (!codes) {
+      const line = invoice.lines?.find((l: any) => l.id === lineId);
+      const alreadyInKitchen = inKitchen && line && !isLinePendingKitchen(line.kitchenStatus);
+      if (alreadyInKitchen) {
+        const ok = window.confirm(
+          `¿Anular "${lineName ?? "este producto"}" en cocina?\nSe quitará del pedido y se avisará al KDS.`,
+        );
+        if (!ok) return;
+      }
+      if (requireApprovalVoidLine) {
+        requestApproval(
+          "Autorizar eliminación",
+          `Eliminar "${lineName ?? "producto"}" requiere PIN de gerente o autenticador.`,
+          (c) => removeLine(lineId, lineName, c),
+        );
+        return;
+      }
     }
     setRemovingLineId(lineId);
     try {
-      const updated = await api.post(`/v1/pos/invoices/${invoice.id}/lines/${lineId}/remove`);
+      const updated = await api.post(`/v1/pos/invoices/${invoice.id}/lines/${lineId}/remove`, codes ?? {});
       if (updated.data.kitchenLineVoidEscpos?.base64) {
         await printKitchenLineVoidEscpos(updated.data.kitchenLineVoidEscpos);
       }
       setInvoice(updated.data);
     } catch (err: any) {
-      alert(err.response?.data?.message ?? "No se pudo quitar el producto");
+      if (isApprovalRequiredError(err) && !codes) {
+        requestApproval(
+          "Autorizar eliminación",
+          approvalErrorMessage(err, "Se requiere autorización de gerente"),
+          (c) => removeLine(lineId, lineName, c),
+        );
+      } else {
+        alert(err.response?.data?.message ?? "No se pudo quitar el producto");
+      }
     } finally {
       setRemovingLineId(null);
     }
@@ -623,19 +664,19 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
 
   async function applyInvoiceDiscount(
     data: { kind: "percent" | "amount"; value: string; reason?: string },
-    approvalPin?: string,
+    codes?: ApprovalCodes,
   ): Promise<boolean | void> {
     if (!invoice) return;
     const baseTotal = invoice.lines?.reduce((sum: number, line: any) => sum + Number(line.lineTotal), 0) ?? 0;
     const pct = data.kind === "percent"
       ? Number(data.value)
       : discountPercentFromAmount(Number(data.value), baseTotal);
-    if (!approvalPin && needsDiscountPin(pct, maxDiscountWithoutPin)) {
-      requestDiscountPin(
+    if (!codes && needsDiscountPin(pct, maxDiscountWithoutPin)) {
+      requestApproval(
         "Autorizar descuento",
-        `El descuento supera el ${maxDiscountWithoutPin}% permitido sin autorización. Ingresa PIN de gerente o administrador.`,
-        async (pin) => {
-          await applyInvoiceDiscount(data, pin);
+        `El descuento supera el ${maxDiscountWithoutPin}%. Usa PIN de gerente o autenticador.`,
+        async (c) => {
+          await applyInvoiceDiscount(data, c);
           setShowDiscount(false);
         },
       );
@@ -645,7 +686,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
       kind: data.kind,
       value: data.value,
       reason: data.reason,
-      approvalPin,
+      ...codes,
     });
     setInvoice(res.data);
   }
@@ -656,14 +697,14 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     setInvoice(res.data);
   }
 
-  async function toggleLineCourtesy(line: any, approvalPin?: string) {
+  async function toggleLineCourtesy(line: any, codes?: ApprovalCodes) {
     if (!invoice) return;
     const isCourtesy = Number(line.lineTotal) === 0 && Number(line.lineDiscount) > 0;
-    if (!isCourtesy && !approvalPin && needsDiscountPin(100, maxDiscountWithoutPin)) {
-      requestDiscountPin(
+    if (!isCourtesy && !codes && needsDiscountPin(100, maxDiscountWithoutPin)) {
+      requestApproval(
         "Autorizar cortesía",
-        "El producto quedará sin costo. Ingresa PIN de gerente o administrador.",
-        (pin) => toggleLineCourtesy(line, pin),
+        "El producto quedará sin costo. Usa PIN de gerente o autenticador.",
+        (c) => toggleLineCourtesy(line, c),
       );
       return;
     }
@@ -671,11 +712,11 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
     try {
       const res = await api.patch(`/v1/pos/invoices/${invoice.id}/lines/${line.id}/discount`, {
         kind: isCourtesy ? "clear" : "courtesy",
-        approvalPin,
+        ...codes,
       });
       setInvoice(res.data);
     } catch (err: unknown) {
-      alert(discountPinErrorMessage(err, "No se pudo aplicar la cortesía"));
+      alert(approvalErrorMessage(err, "No se pudo aplicar la cortesía"));
     } finally {
       setApplyingCourtesyId(null);
     }
@@ -723,7 +764,7 @@ export default function CounterSale({ branchId, branchType }: { branchId: string
   return (
     <div>
       {pinPrompt && (
-        <PinPromptModal
+        <ApprovalPromptModal
           open
           title={pinPrompt.title}
           description={pinPrompt.description}

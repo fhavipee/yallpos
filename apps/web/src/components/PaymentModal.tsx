@@ -3,6 +3,22 @@ import { api, formatCOP } from "../lib/api";
 
 type PaymentMethod = "cash" | "card" | "transfer" | "qr";
 
+export type PaymentDetails = {
+  authCode?: string;
+  rrn?: string;
+  franchise?: string;
+  lastFour?: string;
+  accountType?: "credit" | "debit";
+  installments?: number;
+  terminalId?: string;
+  merchantId?: string;
+  entryMode?: "chip" | "contactless" | "swipe" | "keyed" | "qr" | "manual";
+  provider?: string;
+  externalTxnId?: string;
+  bankName?: string;
+  terminalPayload?: Record<string, unknown>;
+};
+
 export type PayCustomerPayload = {
   docType: "CC" | "NIT" | "CE" | "PA" | "TI" | "RC" | "DIE";
   docNumber: string;
@@ -16,7 +32,12 @@ export type PayCustomerPayload = {
 };
 
 export type PayConfirmData = {
-  payments: { method: PaymentMethod; amount: string }[];
+  payments: {
+    method: PaymentMethod;
+    amount: string;
+    reference?: string;
+    details?: PaymentDetails;
+  }[];
   tipAmount: string;
   requiresNamedBuyer: boolean;
   customerId?: string;
@@ -87,6 +108,20 @@ export default function PaymentModal({
   const [amount1, setAmount1] = useState("");
   const [cashReceived, setCashReceived] = useState(String(total));
   const [giveChange, setGiveChange] = useState(false);
+  const [cardDetails, setCardDetails] = useState({
+    authCode: "",
+    lastFour: "",
+    franchise: "VISA",
+    accountType: "credit" as "credit" | "debit",
+    installments: "1",
+    rrn: "",
+    terminalId: "",
+    provider: "",
+  });
+  const [transferRef, setTransferRef] = useState("");
+  const [transferBank, setTransferBank] = useState("");
+  const [qrRef, setQrRef] = useState("");
+  const [qrProvider, setQrProvider] = useState("nequi");
 
   const [namedBuyer, setNamedBuyer] = useState(false);
   const [search, setSearch] = useState("");
@@ -174,8 +209,67 @@ export default function PaymentModal({
     };
   }
 
+  function buildMethodPayment(method: PaymentMethod, amount: string) {
+    if (method === "card") {
+      return {
+        method,
+        amount,
+        reference: cardDetails.authCode.trim() || undefined,
+        details: {
+          authCode: cardDetails.authCode.trim(),
+          lastFour: cardDetails.lastFour.replace(/\D/g, "").slice(-4) || undefined,
+          franchise: cardDetails.franchise,
+          accountType: cardDetails.accountType,
+          installments: Math.max(1, Number(cardDetails.installments) || 1),
+          rrn: cardDetails.rrn.trim() || undefined,
+          terminalId: cardDetails.terminalId.trim() || undefined,
+          provider: cardDetails.provider.trim() || undefined,
+          entryMode: "manual" as const,
+        },
+      };
+    }
+    if (method === "transfer") {
+      return {
+        method,
+        amount,
+        reference: transferRef.trim(),
+        details: {
+          bankName: transferBank.trim() || undefined,
+          externalTxnId: transferRef.trim() || undefined,
+          entryMode: "manual" as const,
+        },
+      };
+    }
+    if (method === "qr") {
+      return {
+        method,
+        amount,
+        reference: qrRef.trim(),
+        details: {
+          provider: qrProvider,
+          externalTxnId: qrRef.trim() || undefined,
+          entryMode: "qr" as const,
+        },
+      };
+    }
+    return { method, amount };
+  }
+
+  function validateMethod(method: PaymentMethod): string | null {
+    if (method === "card" && !cardDetails.authCode.trim()) {
+      return "Ingrese el código de autorización del datafono";
+    }
+    if (method === "transfer" && !transferRef.trim()) {
+      return "Ingrese la referencia de la transferencia";
+    }
+    if (method === "qr" && !qrRef.trim()) {
+      return "Ingrese la referencia / ID del pago QR";
+    }
+    return null;
+  }
+
   function confirmSingle() {
-    const err = validateBuyer();
+    const err = validateBuyer() || validateMethod(method1);
     if (err) return alert(err);
     if (method1 === "cash") {
       if (cashReceivedNum < totalWithTip) {
@@ -184,7 +278,7 @@ export default function PaymentModal({
       }
       const payAmount = giveChange ? totalWithTip : cashReceivedNum;
       onConfirm({
-        payments: [{ method: method1, amount: String(payAmount) }],
+        payments: [buildMethodPayment(method1, String(payAmount))],
         tipAmount: String(finalTip),
         ...buildPayExtra(),
       });
@@ -192,22 +286,22 @@ export default function PaymentModal({
     }
 
     onConfirm({
-      payments: [{ method: method1, amount: String(totalWithTip) }],
+      payments: [buildMethodPayment(method1, String(totalWithTip))],
       tipAmount: String(tipNum),
       ...buildPayExtra(),
     });
   }
 
   function confirmSplit() {
-    const err = validateBuyer();
+    const err = validateBuyer() || validateMethod(method1) || validateMethod(method2);
     if (err) return alert(err);
     const a1 = Number(amount1) || 0;
     const a2 = totalWithTip - a1;
     if (a1 <= 0 || a2 <= 0) return alert("Montos inválidos para pago mixto");
     onConfirm({
       payments: [
-        { method: method1, amount: String(a1) },
-        { method: method2, amount: String(a2) },
+        buildMethodPayment(method1, String(a1)),
+        buildMethodPayment(method2, String(a2)),
       ],
       tipAmount: tip || "0",
       ...buildPayExtra(),
@@ -233,26 +327,29 @@ export default function PaymentModal({
             </div>
           </div>
         )}
-        <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 8 }}>{formatCOP(total)}</div>
-        {onOpenDiscount && (
-          <button
-            type="button"
-            onClick={onOpenDiscount}
-            style={{
-              marginBottom: 16,
-              padding: "8px 12px",
-              borderRadius: 8,
-              border: "1px solid var(--t-border-strong)",
-              background: "var(--t-card-alt)",
-              color: "var(--t-fg)",
-              cursor: "pointer",
-              fontSize: 13,
-              fontWeight: 600,
-            }}
-          >
-            {invoiceDiscount > 0 ? "✏️ Editar descuento" : "🏷️ Aplicar descuento"}
-          </button>
-        )}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16 }}>
+          <div style={{ fontSize: 32, fontWeight: 800, lineHeight: 1.1 }}>{formatCOP(total)}</div>
+          {onOpenDiscount && (
+            <button
+              type="button"
+              onClick={onOpenDiscount}
+              style={{
+                flexShrink: 0,
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid var(--t-border-strong)",
+                background: "var(--t-card-alt)",
+                color: "var(--t-fg)",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: 600,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {invoiceDiscount > 0 ? "✏️ Descuento" : "🏷️ Descuento"}
+            </button>
+          )}
+        </div>
 
         <div style={{
           marginBottom: 16,
@@ -530,6 +627,126 @@ export default function PaymentModal({
                   </div>
                 )}
               </>
+            )}
+            {method1 === "card" && (
+              <div style={{ display: "grid", gap: 8, marginBottom: 12, padding: 10, borderRadius: 10, border: "1px solid var(--t-border)", background: "var(--t-card-alt)" }}>
+                <div style={{ fontSize: 12, color: "var(--t-muted)" }}>Datos del datafono (sin PAN ni CVV)</div>
+                <label style={labelStyle}>
+                  Código autorización *
+                  <input
+                    value={cardDetails.authCode}
+                    onChange={(e) => setCardDetails({ ...cardDetails, authCode: e.target.value.toUpperCase() })}
+                    style={inputStyle}
+                    placeholder="Ej. 084512"
+                  />
+                </label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <label style={labelStyle}>
+                    Últimos 4
+                    <input
+                      value={cardDetails.lastFour}
+                      onChange={(e) => setCardDetails({ ...cardDetails, lastFour: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                      style={inputStyle}
+                      placeholder="1234"
+                      inputMode="numeric"
+                    />
+                  </label>
+                  <label style={labelStyle}>
+                    Franquicia
+                    <select
+                      value={cardDetails.franchise}
+                      onChange={(e) => setCardDetails({ ...cardDetails, franchise: e.target.value })}
+                      style={inputStyle}
+                    >
+                      <option value="VISA">Visa</option>
+                      <option value="MASTERCARD">Mastercard</option>
+                      <option value="AMEX">Amex</option>
+                      <option value="DINERS">Diners</option>
+                      <option value="OTHER">Otra</option>
+                    </select>
+                  </label>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <label style={labelStyle}>
+                    Tipo
+                    <select
+                      value={cardDetails.accountType}
+                      onChange={(e) => setCardDetails({ ...cardDetails, accountType: e.target.value as "credit" | "debit" })}
+                      style={inputStyle}
+                    >
+                      <option value="credit">Crédito</option>
+                      <option value="debit">Débito</option>
+                    </select>
+                  </label>
+                  <label style={labelStyle}>
+                    Cuotas
+                    <input
+                      value={cardDetails.installments}
+                      onChange={(e) => setCardDetails({ ...cardDetails, installments: e.target.value.replace(/\D/g, "").slice(0, 2) })}
+                      style={inputStyle}
+                      inputMode="numeric"
+                    />
+                  </label>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <label style={labelStyle}>
+                    RRN / voucher
+                    <input
+                      value={cardDetails.rrn}
+                      onChange={(e) => setCardDetails({ ...cardDetails, rrn: e.target.value })}
+                      style={inputStyle}
+                      placeholder="Opcional"
+                    />
+                  </label>
+                  <label style={labelStyle}>
+                    Terminal ID
+                    <input
+                      value={cardDetails.terminalId}
+                      onChange={(e) => setCardDetails({ ...cardDetails, terminalId: e.target.value })}
+                      style={inputStyle}
+                      placeholder="TID"
+                    />
+                  </label>
+                </div>
+                <label style={labelStyle}>
+                  Adquirente / proveedor
+                  <input
+                    value={cardDetails.provider}
+                    onChange={(e) => setCardDetails({ ...cardDetails, provider: e.target.value })}
+                    style={inputStyle}
+                    placeholder="Bold, Redeban, Credibanco…"
+                  />
+                </label>
+              </div>
+            )}
+            {method1 === "transfer" && (
+              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                <label style={labelStyle}>
+                  Referencia *
+                  <input value={transferRef} onChange={(e) => setTransferRef(e.target.value)} style={inputStyle} placeholder="Nº transferencia" />
+                </label>
+                <label style={labelStyle}>
+                  Banco
+                  <input value={transferBank} onChange={(e) => setTransferBank(e.target.value)} style={inputStyle} placeholder="Bancolombia, Nequi…" />
+                </label>
+              </div>
+            )}
+            {method1 === "qr" && (
+              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                <label style={labelStyle}>
+                  ID / referencia *
+                  <input value={qrRef} onChange={(e) => setQrRef(e.target.value)} style={inputStyle} placeholder="ID transacción" />
+                </label>
+                <label style={labelStyle}>
+                  Proveedor
+                  <select value={qrProvider} onChange={(e) => setQrProvider(e.target.value)} style={inputStyle}>
+                    <option value="nequi">Nequi</option>
+                    <option value="daviplata">Daviplata</option>
+                    <option value="bancolombia">Bancolombia</option>
+                    <option value="other">Otro</option>
+                  </select>
+                </label>
+              </div>
             )}
           </>
         ) : (

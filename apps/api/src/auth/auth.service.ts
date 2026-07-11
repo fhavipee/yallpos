@@ -1,8 +1,10 @@
-import { ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { AuthUser } from "./auth.types";
 import { PermissionsService } from "./permissions.service";
+import { buildTotpKeyUri, generateTotpSecret, verifyTotpCode } from "../common/totp.util";
+import { verifyPin } from "../common/pin.util";
 
 @Injectable()
 export class AuthService {
@@ -26,6 +28,76 @@ export class AuthService {
     } catch {
       return false;
     }
+  }
+
+  async getMe(user: AuthUser) {
+    const row = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { totpEnabled: true, pinHash: true, role: true },
+    });
+    return {
+      user: {
+        ...user,
+        totpEnabled: Boolean(row?.totpEnabled),
+        hasPin: Boolean(row?.pinHash),
+      },
+    };
+  }
+
+  async beginTotpSetup(user: AuthUser) {
+    if (!["owner", "manager"].includes(user.role)) {
+      throw new ForbiddenException("Solo gerentes y propietarios pueden activar autenticador");
+    }
+    const secret = generateTotpSecret();
+    const otpauthUrl = buildTotpKeyUri({ email: user.email, secret });
+    // Guarda secreto pendiente hasta confirmar con un código válido
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { totpSecret: secret, totpEnabled: false },
+    });
+    return {
+      secret,
+      otpauthUrl,
+      manualEntry: secret,
+      issuer: "YallPos",
+      hint: "Escanea el otpauthUrl en Google Authenticator / Authy y confirma con el código de 6 dígitos",
+    };
+  }
+
+  async enableTotp(user: AuthUser, code: string, secretFromClient?: string) {
+    if (!["owner", "manager"].includes(user.role)) {
+      throw new ForbiddenException("Solo gerentes y propietarios pueden activar autenticador");
+    }
+    const row = await this.prisma.user.findUnique({ where: { id: user.id } });
+    if (!row) throw new UnauthorizedException();
+    const secret = secretFromClient?.trim() || row.totpSecret;
+    if (!secret) throw new BadRequestException("Inicie el setup de autenticador primero");
+    if (!verifyTotpCode(code, secret)) {
+      throw new BadRequestException("Código de autenticador inválido");
+    }
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { totpSecret: secret, totpEnabled: true },
+    });
+    return { ok: true, totpEnabled: true };
+  }
+
+  async disableTotp(
+    user: AuthUser,
+    dto: { password?: string; approvalPin?: string },
+  ) {
+    const row = await this.prisma.user.findUnique({ where: { id: user.id } });
+    if (!row) throw new UnauthorizedException();
+    const okPassword = dto.password ? this.verifyPassword(dto.password, row.passwordHash) : false;
+    const okPin = dto.approvalPin && row.pinHash ? verifyPin(dto.approvalPin, row.pinHash) : false;
+    if (!okPassword && !okPin) {
+      throw new UnauthorizedException("Confirme con contraseña o PIN para desactivar el autenticador");
+    }
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { totpEnabled: false, totpSecret: null },
+    });
+    return { ok: true, totpEnabled: false };
   }
 
   async login(email: string, password: string) {

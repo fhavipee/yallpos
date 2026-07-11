@@ -106,6 +106,11 @@ export class ReceiptService {
       payments: invoice.payments.map((p) => ({
         method: p.method,
         amount: Number(p.amount),
+        reference: p.reference ?? undefined,
+        authCode: (p as any).authCode ?? undefined,
+        lastFour: (p as any).lastFour ?? undefined,
+        franchise: (p as any).franchise ?? undefined,
+        installments: (p as any).installments ?? undefined,
       })),
       printedAt: new Date().toLocaleString("es-CO", { timeZone: "America/Bogota" }),
     };
@@ -202,7 +207,15 @@ export class ReceiptService {
   ${d.discount ? `<div>Descuento: -$${d.discount.toLocaleString("es-CO")}</div>` : ""}
   <div class="total">TOTAL: $${d.total.toLocaleString("es-CO")}</div>
   <hr>
-  ${d.payments.map((p) => `<div>${p.method.toUpperCase()}: $${p.amount.toLocaleString("es-CO")}</div>`).join("")}
+  ${d.payments.map((p) => {
+    const extra = [
+      p.franchise || p.lastFour ? `${p.franchise ?? "TARJETA"}${p.lastFour ? ` ****${p.lastFour}` : ""}` : "",
+      p.authCode ? `Auth ${p.authCode}` : "",
+      p.installments && p.installments > 1 ? `${p.installments} cuotas` : "",
+      p.reference && p.method !== "card" ? `Ref ${p.reference}` : "",
+    ].filter(Boolean).join(" · ");
+    return `<div>${p.method.toUpperCase()}: $${p.amount.toLocaleString("es-CO")}${extra ? `<div style="font-size:11px;color:#555">${extra}</div>` : ""}</div>`;
+  }).join("")}
   <hr>
   <div class="center">Gracias por su visita</div>
   <div class="center" style="font-size:10px">YallPos</div>

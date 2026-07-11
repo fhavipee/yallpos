@@ -65,6 +65,9 @@ model User {
   email        String
   passwordHash String
   pinHash      String?
+  /// Secreto TOTP (Authenticator) — base32
+  totpSecret   String?
+  totpEnabled  Boolean   @default(false)
   name         String
   role         UserRole
   roleId       String?
@@ -692,10 +695,40 @@ model Payment {
   invoiceId String
   method    PaymentMethod
   amount    Decimal
+  /// Referencia genérica (transferencia, QR, voucher)
   reference String?
   tipAmount Decimal       @default(0)
 
+  /// Código de autorización del datafono / adquirente
+  authCode      String?
+  /// Retrieval Reference Number (RRN)
+  rrn           String?
+  /// VISA | MASTERCARD | AMEX | DINERS | OTHER
+  franchise     String?
+  /// Últimos 4 dígitos (nunca PAN completo — PCI)
+  lastFour      String?
+  /// credit | debit
+  accountType   String?
+  installments  Int?
+  terminalId    String?
+  merchantId    String?
+  /// chip | contactless | swipe | keyed | qr
+  entryMode     String?
+  /// redeban | credibanco | bold | nequi | bancolombia | other
+  provider      String?
+  externalTxnId String?
+  /// Banco (transferencias)
+  bankName      String?
+  /// Payload crudo del datafono / pasarela (auditoría e integración)
+  terminalPayload Json?
+
+  createdAt DateTime @default(now())
+
   invoice SalesInvoice @relation(fields: [invoiceId], references: [id])
+
+  @@index([invoiceId])
+  @@index([authCode])
+  @@index([externalTxnId])
 }
 
 // ─── KDS ───────────────────────────────────────────────────────

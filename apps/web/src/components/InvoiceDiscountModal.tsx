@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { formatCOP } from "../lib/api";
+import type { ApprovalCodes } from "../lib/discountPin";
 
 type DiscountKind = "percent" | "amount";
 
@@ -7,7 +8,7 @@ type Props = {
   baseTotal: number;
   currentDiscount?: number;
   title?: string;
-  onApply: (data: { kind: DiscountKind; value: string; reason?: string }, approvalPin?: string) => Promise<boolean | void>;
+  onApply: (data: { kind: DiscountKind; value: string; reason?: string }, codes?: ApprovalCodes) => Promise<boolean | void>;
   onClear: () => Promise<void>;
   onClose: () => void;
 };

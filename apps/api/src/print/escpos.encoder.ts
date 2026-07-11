@@ -97,7 +97,15 @@ export type ReceiptData = {
   taxBreakdown?: { label: string; base: number; tax: number }[];
   discount?: number;
   total: number;
-  payments: { method: string; amount: number }[];
+  payments: {
+    method: string;
+    amount: number;
+    reference?: string;
+    authCode?: string;
+    lastFour?: string;
+    franchise?: string;
+    installments?: number;
+  }[];
   tip?: number;
   cashier?: string;
   printedAt: string;
@@ -178,6 +186,12 @@ export function buildEscPosReceipt(data: ReceiptData, paperWidth = 32): Buffer {
   enc.separator("-", paperWidth);
   for (const p of data.payments) {
     enc.line(`${p.method.toUpperCase()}: $${p.amount.toLocaleString("es-CO")}`);
+    if (p.franchise || p.lastFour) {
+      enc.line(`  ${(p.franchise ?? "TARJETA")}${p.lastFour ? ` ****${p.lastFour}` : ""}`);
+    }
+    if (p.authCode) enc.line(`  Auth: ${p.authCode}`);
+    if (p.installments && p.installments > 1) enc.line(`  Cuotas: ${p.installments}`);
+    if (p.reference && p.method !== "card") enc.line(`  Ref: ${p.reference}`);
   }
 
   enc.separator("=", paperWidth);

@@ -9,7 +9,7 @@ import { UpdateLineNoteDto } from "./dto/update-line-note.dto";
 import { UpdateLineQtyDto } from "./dto/update-line-qty.dto";
 import { UpdateDeliveryDto } from "./dto/update-delivery.dto";
 import { UpdatePickupDto } from "./dto/update-pickup.dto";
-import { PayInvoiceDto } from "./dto/pay-invoice.dto";
+import { PayInvoiceDto, TerminalPaymentResultDto } from "./dto/pay-invoice.dto";
 import { SplitInvoiceDto } from "./dto/split-invoice.dto";
 import { ApplyInvoiceDiscountDto, ApplyLineDiscountDto } from "./dto/apply-discount.dto";
 import { PrismaService } from "../prisma/prisma.service";
@@ -65,9 +65,9 @@ export class PosController {
   voidOpenInvoice(
     @BranchId() branchId: string,
     @Param("id") id: string,
-    @Body() body?: { reason?: string },
+    @Body() body?: { reason?: string; approvalPin?: string; approvalTotp?: string },
   ) {
-    return this.service.voidOpenInvoice(branchId, id, body?.reason);
+    return this.service.voidOpenInvoice(branchId, id, body);
   }
 
   @Roles(...CASH_ROLES)
@@ -164,8 +164,17 @@ export class PosController {
 
   @Roles(...FLOOR_ROLES)
   @Post("invoices/:id/lines/:lineId/remove")
-  removeLine(@BranchId() branchId: string, @Param("id") id: string, @Param("lineId") lineId: string) {
-    return this.service.removeLine(branchId, id, lineId, { actor: "waiter" });
+  removeLine(
+    @BranchId() branchId: string,
+    @Param("id") id: string,
+    @Param("lineId") lineId: string,
+    @Body() body?: { approvalPin?: string; approvalTotp?: string },
+  ) {
+    return this.service.removeLine(branchId, id, lineId, {
+      actor: "waiter",
+      approvalPin: body?.approvalPin,
+      approvalTotp: body?.approvalTotp,
+    });
   }
 
   @Roles(...KITCHEN_ROLES)
@@ -227,6 +236,16 @@ export class PosController {
   @Post("invoices/:id/pay")
   pay(@BranchId() branchId: string, @Param("id") id: string, @Body() dto: PayInvoiceDto) {
     return this.service.pay(branchId, id, dto);
+  }
+
+  /**
+   * Normaliza respuesta de datafono/SDK hacia el shape de Payment.details
+   * para que el front o un agente la envíe luego en /pay.
+   */
+  @Roles(...CASH_ROLES)
+  @Post("terminal/normalize")
+  normalizeTerminal(@Body() dto: TerminalPaymentResultDto) {
+    return this.service.normalizeTerminalPayment(dto);
   }
 
   @Roles(...FLOOR_ROLES)

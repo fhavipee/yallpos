@@ -15,6 +15,10 @@ export class ApplyInvoiceDiscountDto {
   @IsOptional()
   @IsString()
   approvalPin?: string;
+
+  @IsOptional()
+  @IsString()
+  approvalTotp?: string;
 }
 
 export class ApplyLineDiscountDto {
@@ -32,4 +36,8 @@ export class ApplyLineDiscountDto {
   @IsOptional()
   @IsString()
   approvalPin?: string;
+
+  @IsOptional()
+  @IsString()
+  approvalTotp?: string;
 }

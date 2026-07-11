@@ -5,7 +5,7 @@ import { CreateInvoiceDto } from "./dto/create-invoice.dto";
 import { AddLineDto } from "./dto/add-line.dto";
 import { UpdateDeliveryDto } from "./dto/update-delivery.dto";
 import { UpdatePickupDto } from "./dto/update-pickup.dto";
-import { PayInvoiceDto } from "./dto/pay-invoice.dto";
+import { PayInvoiceDto, TerminalPaymentResultDto } from "./dto/pay-invoice.dto";
 import { ApplyInvoiceDiscountDto, ApplyLineDiscountDto } from "./dto/apply-discount.dto";
 import { KdsService } from "../kds/kds.service";
 import { FiscalService } from "../fiscal/fiscal.service";
@@ -31,7 +31,7 @@ import { readBranchNotificationSettings } from "../settings/branch-notifications
 import {
   discountPercentRequiresApproval,
   readBranchPosSettings,
-  verifyDiscountApprovalPin,
+  verifyElevatedApproval,
 } from "../settings/branch-pos.util";
 import { calcLineAmountsFromRates } from "../common/tax.util";
 import { TaxDefinitionService } from "../tax/tax-definition.service";
@@ -268,7 +268,11 @@ export class PosService {
     });
   }
 
-  async voidOpenInvoice(branchId: string, invoiceId: string, reason?: string) {
+  async voidOpenInvoice(
+    branchId: string,
+    invoiceId: string,
+    opts?: { reason?: string; approvalPin?: string; approvalTotp?: string; skipApproval?: boolean },
+  ) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, branchId },
       include: {
@@ -276,6 +280,34 @@ export class PosService {
       },
     });
     if (!invoice) throw new NotFoundException("Invoice not found");
+
+    const posSettings = await readBranchPosSettings(this.prisma, branchId);
+    if (posSettings.requireApprovalVoidInvoice && !opts?.skipApproval) {
+      const branch = await this.prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { company: { select: { tenantId: true } } },
+      });
+      if (!branch) throw new NotFoundException("Branch not found");
+      if (!opts?.approvalPin?.trim() && !opts?.approvalTotp?.trim()) {
+        throw new ForbiddenException({
+          code: "APPROVAL_REQUIRED",
+          message: "Anular comanda requiere PIN de gerente o autenticador",
+          action: "void_invoice",
+        });
+      }
+      const approval = await verifyElevatedApproval(
+        this.prisma,
+        branchId,
+        branch.company.tenantId,
+        { approvalPin: opts?.approvalPin, approvalTotp: opts?.approvalTotp },
+      );
+      opts = {
+        ...opts,
+        reason: opts?.reason
+          ? `${opts.reason} · Autorizado: ${approval.approverName}`
+          : `Autorizado: ${approval.approverName}`,
+      };
+    }
 
     const isCounterStyle =
       !invoice.tableSessionId && ["counter", "takeaway", "delivery"].includes(invoice.serviceType);
@@ -297,6 +329,7 @@ export class PosService {
 
     await this.kds.cancelInvoiceItems(branchId, invoiceId);
 
+    const reason = opts?.reason;
     const noteSuffix = reason ? `[Anulado] ${reason}` : "[Anulado]";
     const notes = invoice.notes ? `${invoice.notes}\n${noteSuffix}` : noteSuffix;
     const wasInKitchen = invoice.status === "sent_to_kitchen";
@@ -354,7 +387,7 @@ export class PosService {
 
   /** @deprecated use voidOpenInvoice */
   async voidOpenCounterInvoice(branchId: string, invoiceId: string, reason?: string) {
-    return this.voidOpenInvoice(branchId, invoiceId, reason);
+    return this.voidOpenInvoice(branchId, invoiceId, { reason });
   }
 
   private buildCounterOrderLabel(invoice: {
@@ -406,11 +439,10 @@ export class PosService {
     const voided: string[] = [];
     const kitchenVoidIds: string[] = [];
     for (const invoice of stale) {
-      const result = await this.voidOpenInvoice(
-        branchId,
-        invoice.id,
-        `Anulado automaticamente por antiguedad (+${hours}h)`,
-      );
+      const result = await this.voidOpenInvoice(branchId, invoice.id, {
+        reason: `Anulado automaticamente por antiguedad (+${hours}h)`,
+        skipApproval: true,
+      });
       voided.push(invoice.id);
       if (result.wasInKitchen) kitchenVoidIds.push(invoice.id);
     }
@@ -1088,7 +1120,11 @@ export class PosService {
     branchId: string,
     invoiceId: string,
     lineId: string,
-    options: { actor: "waiter" | "kitchen" } = { actor: "waiter" },
+    options: {
+      actor: "waiter" | "kitchen";
+      approvalPin?: string;
+      approvalTotp?: string;
+    } = { actor: "waiter" },
   ) {
     const invoice = await this.prisma.salesInvoice.findFirst({
       where: { id: invoiceId, branchId },
@@ -1104,6 +1140,26 @@ export class PosService {
       include: { modifiers: true },
     });
     if (!line) throw new NotFoundException("Line not found");
+
+    const posSettings = await readBranchPosSettings(this.prisma, branchId);
+    if (posSettings.requireApprovalVoidLine && options.actor === "waiter") {
+      const branch = await this.prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { company: { select: { tenantId: true } } },
+      });
+      if (!branch) throw new NotFoundException("Branch not found");
+      if (!options.approvalPin?.trim() && !options.approvalTotp?.trim()) {
+        throw new ForbiddenException({
+          code: "APPROVAL_REQUIRED",
+          message: "Eliminar producto requiere PIN de gerente o autenticador",
+          action: "void_line",
+        });
+      }
+      await verifyElevatedApproval(this.prisma, branchId, branch.company.tenantId, {
+        approvalPin: options.approvalPin,
+        approvalTotp: options.approvalTotp,
+      });
+    }
 
     const kdsItems = await this.prisma.kdsItem.findMany({
       where: {
@@ -1233,7 +1289,10 @@ export class PosService {
     }
 
     if (dto.kind !== "clear") {
-      await this.assertDiscountApproved(branchId, discountPercent, dto.approvalPin);
+      await this.assertDiscountApproved(branchId, discountPercent, {
+        approvalPin: dto.approvalPin,
+        approvalTotp: dto.approvalTotp,
+      });
     }
 
     lineDiscount = Math.min(Math.max(0, Math.round(lineDiscount)), gross);
@@ -1293,7 +1352,10 @@ export class PosService {
     }
 
     if (dto.kind !== "clear") {
-      await this.assertDiscountApproved(branchId, discountPercent, dto.approvalPin);
+      await this.assertDiscountApproved(branchId, discountPercent, {
+        approvalPin: dto.approvalPin,
+        approvalTotp: dto.approvalTotp,
+      });
     }
 
     discount = Math.min(Math.max(0, Math.round(discount)), linesTotal);
@@ -1321,16 +1383,21 @@ export class PosService {
     return updated;
   }
 
-  private async assertDiscountApproved(branchId: string, discountPercent: number, approvalPin?: string) {
+  private async assertDiscountApproved(
+    branchId: string,
+    discountPercent: number,
+    approval?: { approvalPin?: string; approvalTotp?: string },
+  ) {
     const posSettings = await readBranchPosSettings(this.prisma, branchId);
     if (!discountPercentRequiresApproval(discountPercent, posSettings.maxDiscountPercentWithoutPin)) {
       return;
     }
-    if (!approvalPin?.trim()) {
+    if (!approval?.approvalPin?.trim() && !approval?.approvalTotp?.trim()) {
       throw new ForbiddenException({
-        code: "DISCOUNT_PIN_REQUIRED",
-        message: `Descuento superior al ${posSettings.maxDiscountPercentWithoutPin}% requiere PIN de supervisor`,
+        code: "APPROVAL_REQUIRED",
+        message: `Descuento superior al ${posSettings.maxDiscountPercentWithoutPin}% requiere PIN de gerente o autenticador`,
         maxWithoutPin: posSettings.maxDiscountPercentWithoutPin,
+        action: "discount",
       });
     }
     const branch = await this.prisma.branch.findUnique({
@@ -1338,7 +1405,10 @@ export class PosService {
       select: { company: { select: { tenantId: true } } },
     });
     if (!branch) throw new NotFoundException("Branch not found");
-    await verifyDiscountApprovalPin(this.prisma, branchId, branch.company.tenantId, approvalPin.trim());
+    await verifyElevatedApproval(this.prisma, branchId, branch.company.tenantId, {
+      approvalPin: approval?.approvalPin,
+      approvalTotp: approval?.approvalTotp,
+    });
   }
 
   private notifyInvoiceDiscountChange(
@@ -1571,6 +1641,10 @@ export class PosService {
     const openSession = await this.prisma.posSession.findFirst({ where: { branchId, status: "open" } });
     if (!openSession) throw new BadRequestException("Debe abrir caja antes de cobrar");
 
+    for (const p of dto.payments) {
+      this.assertPaymentDetails(p.method, p.reference, p.details);
+    }
+
     const needsPickupCode =
       ["counter", "takeaway"].includes(invoice.serviceType) && !invoice.pickupCode;
     const pickupCode = needsPickupCode ? await this.nextAutoOrderCode(branchId) : undefined;
@@ -1579,13 +1653,30 @@ export class PosService {
 
     const paidInvoice = await this.prisma.$transaction(async (tx: any) => {
       await tx.payment.createMany({
-        data: dto.payments.map((p) => ({
-          invoiceId: invoice.id,
-          method: p.method,
-          amount: p.amount,
-          reference: p.reference ?? null,
-          tipAmount: p.tipAmount ?? 0,
-        })),
+        data: dto.payments.map((p) => {
+          const d = p.details;
+          const lastFour = d?.lastFour?.replace(/\D/g, "").slice(-4) || null;
+          return {
+            invoiceId: invoice.id,
+            method: p.method,
+            amount: p.amount,
+            reference: p.reference?.trim() || d?.externalTxnId || d?.rrn || d?.authCode || null,
+            tipAmount: p.tipAmount ?? 0,
+            authCode: d?.authCode?.trim() || null,
+            rrn: d?.rrn?.trim() || null,
+            franchise: d?.franchise?.trim()?.toUpperCase() || null,
+            lastFour,
+            accountType: d?.accountType || null,
+            installments: d?.installments ?? null,
+            terminalId: d?.terminalId?.trim() || null,
+            merchantId: d?.merchantId?.trim() || null,
+            entryMode: d?.entryMode || (p.method === "card" ? "manual" : null),
+            provider: d?.provider?.trim()?.toLowerCase() || null,
+            externalTxnId: d?.externalTxnId?.trim() || null,
+            bankName: d?.bankName?.trim() || null,
+            terminalPayload: d?.terminalPayload ? (d.terminalPayload as object) : undefined,
+          };
+        }),
       });
 
       const inv = await tx.salesInvoice.update({
@@ -1662,6 +1753,79 @@ export class PosService {
     }
 
     return { ...paidInvoice.inv, fiscalDocument: fiscalDoc };
+  }
+
+  /**
+   * Mapea campos típicos de datafonos CO (Bold, Redeban, Credibanco, Nequi)
+   * a Payment.details listo para /pay.
+   */
+  normalizeTerminalPayment(dto: TerminalPaymentResultDto) {
+    const raw = { ...(dto.raw ?? {}), ...(dto.details ?? {}) } as Record<string, unknown>;
+    const pick = (...keys: string[]) => {
+      for (const k of keys) {
+        const v = raw[k];
+        if (v != null && String(v).trim() !== "") return String(v).trim();
+      }
+      return undefined;
+    };
+    const lastFourRaw = pick("lastFour", "last4", "cardLast4", "maskedPan", "pan");
+    const lastFour = lastFourRaw ? lastFourRaw.replace(/\D/g, "").slice(-4) : undefined;
+    const installmentsRaw = pick("installments", "cuotas", "quotas");
+    const details = {
+      authCode: pick("authCode", "authorizationCode", "approvalCode", "codigoAutorizacion", "auth"),
+      rrn: pick("rrn", "retrievalReferenceNumber", "receiptNumber", "voucher"),
+      franchise: pick("franchise", "brand", "cardBrand", "franquicia")?.toUpperCase(),
+      lastFour: lastFour && lastFour.length === 4 ? lastFour : undefined,
+      accountType: (pick("accountType", "tipoCuenta", "cardType")?.toLowerCase().includes("deb")
+        ? "debit"
+        : pick("accountType", "tipoCuenta", "cardType")
+          ? "credit"
+          : undefined) as "credit" | "debit" | undefined,
+      installments: installmentsRaw ? Number(installmentsRaw) || undefined : undefined,
+      terminalId: pick("terminalId", "tid", "terminal"),
+      merchantId: pick("merchantId", "mid", "comercio"),
+      entryMode: (pick("entryMode", "lectura", "entry_mode")?.toLowerCase() as any) || "chip",
+      provider: pick("provider", "acquirer", "adquirente", "pasarela")?.toLowerCase(),
+      externalTxnId: pick("externalTxnId", "transactionId", "txnId", "idTransaccion", "uuid"),
+      bankName: pick("bankName", "banco", "bank"),
+      terminalPayload: dto.raw ?? raw,
+    };
+    return {
+      method: dto.method ?? "card",
+      amount: dto.amount,
+      reference: details.externalTxnId || details.rrn || details.authCode,
+      details,
+    };
+  }
+
+  private assertPaymentDetails(
+    method: string,
+    reference?: string,
+    details?: {
+      authCode?: string;
+      externalTxnId?: string;
+      rrn?: string;
+      lastFour?: string;
+    },
+  ) {
+    if (method === "card") {
+      if (!details?.authCode?.trim()) {
+        throw new BadRequestException("Pago con tarjeta requiere código de autorización del datafono");
+      }
+      if (details.lastFour && !/^\d{4}$/.test(details.lastFour.replace(/\D/g, "").slice(-4))) {
+        throw new BadRequestException("Últimos 4 dígitos inválidos");
+      }
+    }
+    if (method === "transfer" || method === "qr") {
+      const ref = reference?.trim() || details?.externalTxnId?.trim() || details?.rrn?.trim();
+      if (!ref) {
+        throw new BadRequestException(
+          method === "qr"
+            ? "Pago QR requiere referencia / ID de transacción"
+            : "Transferencia requiere número de referencia",
+        );
+      }
+    }
   }
 
   async getInvoice(branchId: string, invoiceId: string) {

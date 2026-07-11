@@ -60,5 +60,7 @@ export class UpdateBranchSettingsDto {
     maxDiscountPercentWithoutPin?: number;
     /** manual = esperar "Enviar a cocina"; auto = cada producto va al KDS al agregarlo. */
     kitchenSendMode?: "manual" | "auto";
+    requireApprovalVoidInvoice?: boolean;
+    requireApprovalVoidLine?: boolean;
   };
 }
