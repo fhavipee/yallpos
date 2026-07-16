@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, setBranchId, formatCOP } from "../lib/api";
-import { reprintInvoice, printReportX } from "../lib/print";
+import { reprintInvoice, printCashReport } from "../lib/print";
 import { downloadTableServiceTimesCsv, printTableServiceTimesReport, downloadTableServiceTimesWeeklyCsv, printTableServiceTimesWeeklyReport, getWeekStartMonday } from "../lib/tableServiceReport";
 import { getStoredAuth } from "../lib/auth";
 
@@ -33,6 +33,14 @@ type DashboardData = {
   }[];
 };
 
+type CashMovement = {
+  id: string;
+  type: "withdrawal" | "deposit" | "expense" | string;
+  amount: number;
+  reason?: string | null;
+  createdAt: string;
+};
+
 type CashReport = {
   sessionId?: string;
   status?: string;
@@ -41,21 +49,57 @@ type CashReport = {
   expectedCash?: number;
   invoiceCount?: number;
   paymentsByMethod?: Record<string, number>;
+  cashSales?: number;
+  deposits?: number;
+  withdrawals?: number;
+  expenses?: number;
+  cashRegisterId?: string | null;
+  cashRegisterName?: string | null;
+  movements?: CashMovement[];
   message?: string;
 };
 
-type ReportXData = {
+type CashRegister = { id: string; name: string };
+
+type SessionSummary = {
+  id: string;
+  status: string;
+  openedAt: string;
+  closedAt?: string | null;
+  cashRegisterName?: string | null;
+  openingCash: number;
+  closingCash: number;
+  expectedCash: number;
+  cashDifference: number;
+  invoiceCount: number;
+  deposits: number;
+  withdrawals: number;
+  expenses: number;
+};
+
+type CashSessionReport = {
   sessionId: string;
   status: string;
+  reportType: "X" | "Z";
   businessName: string;
   branchName: string;
+  cashRegisterName?: string | null;
   openedAt: string;
+  closedAt?: string | null;
   openingCash: number;
+  closingCash?: number | null;
+  cashDifference?: number | null;
   totalSales: number;
   totalTips: number;
   expectedCash: number;
+  cashSales?: number;
+  deposits?: number;
+  withdrawals?: number;
+  expenses?: number;
   invoiceCount: number;
   paymentsByMethod: Record<string, number>;
+  movements?: CashMovement[];
+  notes?: string | null;
 };
 
 type TableServiceTimes = {
@@ -137,17 +181,37 @@ const PAYMENT_LABELS: Record<string, string> = {
   mixed: "Mixto",
 };
 
+const MOVEMENT_LABELS: Record<string, string> = {
+  deposit: "Depósito",
+  withdrawal: "Retiro",
+  expense: "Gasto",
+};
+
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export default function Dashboard({ branchId }: { branchId: string }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [cash, setCash] = useState<CashReport | null>(null);
+  const [registers, setRegisters] = useState<CashRegister[]>([]);
+  const [selectedRegisterId, setSelectedRegisterId] = useState("");
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [closingCash, setClosingCash] = useState("");
+  const [closeNotes, setCloseNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [printingId, setPrintingId] = useState<string | null>(null);
-  const [reportX, setReportX] = useState<ReportXData | null>(null);
-  const [loadingReportX, setLoadingReportX] = useState(false);
-  const [printingReportX, setPrintingReportX] = useState(false);
+  const [sessionReport, setSessionReport] = useState<CashSessionReport | null>(null);
+  const [loadingReport, setLoadingReport] = useState(false);
+  const [printingReport, setPrintingReport] = useState(false);
   const [openingCash, setOpeningCash] = useState("150000");
   const [openingSession, setOpeningSession] = useState(false);
+  const [movementType, setMovementType] = useState<"withdrawal" | "deposit" | "expense">("withdrawal");
+  const [movementAmount, setMovementAmount] = useState("");
+  const [movementReason, setMovementReason] = useState("");
+  const [savingMovement, setSavingMovement] = useState(false);
+  const [reportFrom, setReportFrom] = useState(todayISO);
+  const [reportTo, setReportTo] = useState(todayISO);
   const [serviceTimes, setServiceTimes] = useState<TableServiceTimes | null>(null);
   const [weeklyTimes, setWeeklyTimes] = useState<WeeklyServiceTimes | null>(null);
   const [weekStart, setWeekStart] = useState(() => getWeekStartMonday());
@@ -157,20 +221,24 @@ export default function Dashboard({ branchId }: { branchId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [dash, cashReport, timesReport, weeklyReport] = await Promise.all([
-        api.get("/v1/reports/dashboard"),
+      const [dash, cashReport, timesReport, weeklyReport, regs, sess] = await Promise.all([
+        api.get("/v1/reports/dashboard", { params: { from: reportFrom, to: reportTo } }),
         api.get("/v1/reports/cash"),
         api.get("/v1/reports/table-service-times").catch(() => ({ data: null })),
         api.get("/v1/reports/table-service-times/weekly", { params: { weekStart } }).catch(() => ({ data: null })),
+        api.get("/v1/cash/registers").catch(() => ({ data: [] })),
+        api.get("/v1/cash/sessions", { params: { take: 10 } }).catch(() => ({ data: [] })),
       ]);
       setData(dash.data);
       setCash(cashReport.data);
       setServiceTimes(timesReport.data);
       setWeeklyTimes(weeklyReport.data);
+      setRegisters(regs.data ?? []);
+      setSessions(sess.data ?? []);
     } finally {
       setLoading(false);
     }
-  }, [weekStart]);
+  }, [weekStart, reportFrom, reportTo]);
 
   useEffect(() => { setBranchId(branchId); }, [branchId]);
 
@@ -189,6 +257,7 @@ export default function Dashboard({ branchId }: { branchId: string }) {
       await api.post("/v1/cash/session/open", {
         userId: auth.user.id,
         openingCash: Number(openingCash) || 0,
+        ...(selectedRegisterId ? { cashRegisterId: selectedRegisterId } : {}),
       });
       await load();
     } catch (err: any) {
@@ -198,14 +267,40 @@ export default function Dashboard({ branchId }: { branchId: string }) {
     }
   }
 
+  async function addCashMovement() {
+    if (!cash?.sessionId || !movementAmount) return;
+    setSavingMovement(true);
+    try {
+      await api.post(`/v1/cash/session/${cash.sessionId}/movements`, {
+        type: movementType,
+        amount: Number(movementAmount),
+        reason: movementReason.trim() || undefined,
+      });
+      setMovementAmount("");
+      setMovementReason("");
+      await load();
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "No se pudo registrar el movimiento");
+    } finally {
+      setSavingMovement(false);
+    }
+  }
+
   async function closeCash() {
     if (!cash?.sessionId || !closingCash) return;
-    await api.post(`/v1/cash/session/${cash.sessionId}/close`, {
-      closingCash: Number(closingCash),
-    });
-    alert("✅ Caja cerrada");
-    setClosingCash("");
-    load();
+    try {
+      const res = await api.post(`/v1/cash/session/${cash.sessionId}/close`, {
+        closingCash: Number(closingCash),
+        notes: closeNotes.trim() || undefined,
+      });
+      setClosingCash("");
+      setCloseNotes("");
+      await load();
+      const z = await api.get(`/v1/cash/session/${res.data.id}/report-z`);
+      setSessionReport(z.data);
+    } catch (err: any) {
+      alert(err.response?.data?.message ?? "No se pudo cerrar caja");
+    }
   }
 
   async function handleReprint(invoiceId: string) {
@@ -218,27 +313,28 @@ export default function Dashboard({ branchId }: { branchId: string }) {
     }
   }
 
-  async function showReportX() {
-    if (!cash?.sessionId) return alert("No hay sesión de caja abierta");
-    setLoadingReportX(true);
+  async function showSessionReport(sessionId?: string) {
+    const id = sessionId ?? cash?.sessionId;
+    if (!id) return alert("No hay sesión de caja");
+    setLoadingReport(true);
     try {
-      const res = await api.get(`/v1/cash/session/${cash.sessionId}/report-x`);
-      setReportX(res.data);
+      const res = await api.get(`/v1/cash/session/${id}/report`);
+      setSessionReport(res.data);
     } catch {
-      alert("No se pudo cargar el reporte X");
+      alert("No se pudo cargar el reporte");
     } finally {
-      setLoadingReportX(false);
+      setLoadingReport(false);
     }
   }
 
-  async function handlePrintReportX() {
-    if (!reportX?.sessionId) return;
-    setPrintingReportX(true);
+  async function handlePrintSessionReport() {
+    if (!sessionReport?.sessionId) return;
+    setPrintingReport(true);
     try {
-      const result = await printReportX(reportX.sessionId);
+      const result = await printCashReport(sessionReport.sessionId);
       if (!result.ok) alert("Print Agent no disponible — configure impresora en puerto 9101");
     } finally {
-      setPrintingReportX(false);
+      setPrintingReport(false);
     }
   }
 
@@ -252,42 +348,70 @@ export default function Dashboard({ branchId }: { branchId: string }) {
   if (!data) return <div>Sin datos</div>;
 
   const maxHour = Math.max(...data.salesByHour.map((h) => h.total), 1);
+  const closedSessions = sessions.filter((s) => s.status === "closed");
 
   return (
     <div>
-      {reportX && (
+      {sessionReport && (
         <div style={{
           position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
           display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50,
         }}>
-          <div style={{ background: "var(--t-card)", borderRadius: 16, padding: 24, width: 420, maxWidth: "92vw" }}>
+          <div style={{ background: "var(--t-card)", borderRadius: 16, padding: 24, width: 440, maxWidth: "92vw", maxHeight: "90vh", overflowY: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: 0 }}>Reporte X</h3>
+                <h3 style={{ margin: 0 }}>Reporte {sessionReport.reportType}</h3>
                 <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--t-muted)" }}>
-                  {reportX.businessName} · {reportX.branchName}
+                  {sessionReport.businessName} · {sessionReport.branchName}
+                  {sessionReport.cashRegisterName ? ` · ${sessionReport.cashRegisterName}` : ""}
                 </p>
               </div>
-              <button onClick={() => setReportX(null)} style={{ border: "none", background: "transparent", fontSize: 20, cursor: "pointer", color: "var(--t-muted)" }}>×</button>
+              <button onClick={() => setSessionReport(null)} style={{ border: "none", background: "transparent", fontSize: 20, cursor: "pointer", color: "var(--t-muted)" }}>×</button>
             </div>
 
             <div style={{ fontSize: 13, color: "var(--t-muted)", marginBottom: 12 }}>
-              Apertura: {new Date(reportX.openedAt).toLocaleString("es-CO")}
+              Apertura: {new Date(sessionReport.openedAt).toLocaleString("es-CO")}
+              {sessionReport.closedAt ? ` · Cierre: ${new Date(sessionReport.closedAt).toLocaleString("es-CO")}` : ""}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-              <ReportKpi label="Ventas sesión" value={formatCOP(reportX.totalSales)} />
-              <ReportKpi label="Transacciones" value={String(reportX.invoiceCount)} />
-              <ReportKpi label="Propinas" value={formatCOP(reportX.totalTips ?? 0)} />
-              <ReportKpi label="Efectivo esperado" value={formatCOP(reportX.expectedCash)} />
+              <ReportKpi label="Ventas sesión" value={formatCOP(sessionReport.totalSales)} />
+              <ReportKpi label="Transacciones" value={String(sessionReport.invoiceCount)} />
+              <ReportKpi label="Propinas" value={formatCOP(sessionReport.totalTips ?? 0)} />
+              <ReportKpi label="Efectivo esperado" value={formatCOP(sessionReport.expectedCash)} />
+              {sessionReport.closingCash != null && (
+                <>
+                  <ReportKpi label="Efectivo contado" value={formatCOP(sessionReport.closingCash)} />
+                  <ReportKpi label="Diferencia" value={formatCOP(sessionReport.cashDifference ?? 0)} />
+                </>
+              )}
+            </div>
+
+            <div style={{ background: "var(--t-card-alt)", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Arqueo</div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span>Apertura</span><strong>{formatCOP(sessionReport.openingCash)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span>Ventas efectivo</span><strong>{formatCOP(sessionReport.cashSales ?? 0)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span>Depósitos</span><strong>{formatCOP(sessionReport.deposits ?? 0)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span>Retiros</span><strong>{formatCOP(sessionReport.withdrawals ?? 0)}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span>Gastos</span><strong>{formatCOP(sessionReport.expenses ?? 0)}</strong>
+              </div>
             </div>
 
             <div style={{ background: "var(--t-card-alt)", borderRadius: 10, padding: 12, marginBottom: 16 }}>
               <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Medios de pago</div>
-              {Object.entries(reportX.paymentsByMethod).length === 0 ? (
+              {Object.entries(sessionReport.paymentsByMethod).length === 0 ? (
                 <p style={{ margin: 0, fontSize: 13, color: "var(--t-muted)" }}>Sin pagos registrados</p>
               ) : (
-                Object.entries(reportX.paymentsByMethod).map(([method, amount]) => (
+                Object.entries(sessionReport.paymentsByMethod).map(([method, amount]) => (
                   <div key={method} style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 4 }}>
                     <span>{PAYMENT_LABELS[method] ?? method}</span>
                     <strong>{formatCOP(Number(amount))}</strong>
@@ -296,44 +420,88 @@ export default function Dashboard({ branchId }: { branchId: string }) {
               )}
             </div>
 
+            {(sessionReport.movements?.length ?? 0) > 0 && (
+              <div style={{ background: "var(--t-card-alt)", borderRadius: 10, padding: 12, marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Movimientos</div>
+                {sessionReport.movements!.map((m) => (
+                  <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4, gap: 8 }}>
+                    <span>
+                      {MOVEMENT_LABELS[m.type] ?? m.type}
+                      {m.reason ? ` · ${m.reason}` : ""}
+                    </span>
+                    <strong>{formatCOP(m.amount)}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 8 }}>
               <button
-                onClick={handlePrintReportX}
-                disabled={printingReportX}
+                onClick={handlePrintSessionReport}
+                disabled={printingReport}
                 style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" }}
               >
-                {printingReportX ? "Imprimiendo…" : "🖨️ Imprimir térmica"}
+                {printingReport ? "Imprimiendo…" : "🖨️ Imprimir térmica"}
               </button>
               <button
-                onClick={() => setReportX(null)}
+                onClick={() => setSessionReport(null)}
                 style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "none", background: "var(--t-primary)", color: "var(--t-primary-fg)", cursor: "pointer" }}
               >
                 Cerrar
               </button>
             </div>
             <p style={{ margin: "12px 0 0", fontSize: 11, color: "var(--t-muted)", textAlign: "center" }}>
-              Caja abierta — no es cierre Z
+              {sessionReport.reportType === "Z" ? "Cierre de caja (Z)" : "Caja abierta — no es cierre Z"}
             </p>
           </div>
         </div>
       )}
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-        <h2 style={{ margin: 0 }}>Dashboard — Hoy</h2>
-        <button onClick={load} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>
-          Actualizar
-        </button>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
+        <h2 style={{ margin: 0 }}>
+          Dashboard
+          {reportFrom === reportTo ? ` — ${reportFrom}` : ` — ${reportFrom} → ${reportTo}`}
+        </h2>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+            Desde
+            <input
+              type="date"
+              value={reportFrom}
+              onChange={(e) => setReportFrom(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--t-border-strong)" }}
+            />
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+            Hasta
+            <input
+              type="date"
+              value={reportTo}
+              onChange={(e) => setReportTo(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--t-border-strong)" }}
+            />
+          </label>
+          <button
+            onClick={() => { setReportFrom(todayISO()); setReportTo(todayISO()); }}
+            style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer", fontSize: 13 }}
+          >
+            Hoy
+          </button>
+          <button onClick={load} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", cursor: "pointer" }}>
+            Actualizar
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 24 }}>
-        <Kpi label="Ventas hoy" value={formatCOP(data.summary.totalSales)} accent="#2563eb" />
+        <Kpi label={reportFrom === reportTo ? "Ventas hoy" : "Ventas periodo"} value={formatCOP(data.summary.totalSales)} accent="#2563eb" />
         <Kpi label="Transacciones" value={String(data.summary.invoiceCount)} accent="#7c3aed" />
         <Kpi label="Ticket promedio" value={formatCOP(data.summary.ticketAverage)} accent="#0891b2" />
         <Kpi label="IVA recaudado" value={formatCOP(data.summary.totalTax)} accent="#059669" />
         <Kpi label="Propinas" value={formatCOP(data.summary.totalTips ?? 0)} accent="#d97706" />
         <Kpi label="DE POS OK" value={String(data.summary.fiscalAccepted)} accent="#16a34a" />
         <Kpi label="Contingencia" value={String(data.summary.fiscalContingency)} accent={data.summary.fiscalContingency ? "#dc2626" : "#94a3b8"} />
-        <Kpi label="Anulados hoy" value={String(data.summary.voidedCount ?? 0)} accent="#dc2626" />
+        <Kpi label="Anulados" value={String(data.summary.voidedCount ?? 0)} accent="#dc2626" />
         <Kpi label="Valor anulado" value={formatCOP(data.summary.voidedTotal ?? 0)} accent="#b91c1c" />
       </div>
 
@@ -385,6 +553,21 @@ export default function Dashboard({ branchId }: { branchId: string }) {
           {cash?.message ? (
             <>
               <p style={{ color: "var(--t-muted)", marginBottom: 12 }}>{cash.message}</p>
+              {registers.length > 0 && (
+                <label style={{ display: "grid", gap: 6, fontSize: 14, marginBottom: 10 }}>
+                  Caja registradora
+                  <select
+                    value={selectedRegisterId}
+                    onChange={(e) => setSelectedRegisterId(e.target.value)}
+                    style={{ padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                  >
+                    <option value="">Sin asignar</option>
+                    {registers.map((r) => (
+                      <option key={r.id} value={r.id}>{r.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label style={{ display: "grid", gap: 6, fontSize: 14 }}>
                 Efectivo inicial
                 <input
@@ -404,25 +587,80 @@ export default function Dashboard({ branchId }: { branchId: string }) {
           ) : (
             <>
               <Row label="Estado" value={cash?.status === "open" ? "🟢 Abierta" : "Cerrada"} />
+              {cash?.cashRegisterName && <Row label="Caja" value={cash.cashRegisterName} />}
               <Row label="Apertura" value={formatCOP(cash?.openingCash ?? 0)} />
               <Row label="Ventas sesión" value={formatCOP(cash?.totalSales ?? 0)} />
+              <Row label="Ventas efectivo" value={formatCOP(cash?.cashSales ?? 0)} />
+              {(cash?.deposits ?? 0) > 0 && <Row label="Depósitos" value={formatCOP(cash!.deposits!)} />}
+              {(cash?.withdrawals ?? 0) > 0 && <Row label="Retiros" value={formatCOP(cash!.withdrawals!)} />}
+              {(cash?.expenses ?? 0) > 0 && <Row label="Gastos" value={formatCOP(cash!.expenses!)} />}
               <Row label="Efectivo esperado" value={formatCOP(cash?.expectedCash ?? 0)} />
               {cash?.status === "open" && (
-                <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-                  <button onClick={showReportX} disabled={loadingReportX} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" }}>
-                    {loadingReportX ? "Cargando…" : "Ver reporte X"}
+                <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
+                  <div style={{ background: "var(--t-card-alt)", borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Movimiento de caja</div>
+                    <div style={{ display: "grid", gap: 8 }}>
+                      <select
+                        value={movementType}
+                        onChange={(e) => setMovementType(e.target.value as typeof movementType)}
+                        style={{ padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                      >
+                        <option value="withdrawal">Retiro</option>
+                        <option value="deposit">Depósito</option>
+                        <option value="expense">Gasto</option>
+                      </select>
+                      <input
+                        placeholder="Monto"
+                        value={movementAmount}
+                        onChange={(e) => setMovementAmount(e.target.value)}
+                        style={{ padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                      />
+                      <input
+                        placeholder="Motivo (opcional)"
+                        value={movementReason}
+                        onChange={(e) => setMovementReason(e.target.value)}
+                        style={{ padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                      />
+                      <button
+                        onClick={addCashMovement}
+                        disabled={savingMovement || !movementAmount}
+                        style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" }}
+                      >
+                        {savingMovement ? "Guardando…" : "Registrar movimiento"}
+                      </button>
+                    </div>
+                    {(cash.movements?.length ?? 0) > 0 && (
+                      <div style={{ marginTop: 10, maxHeight: 120, overflowY: "auto" }}>
+                        {cash.movements!.slice(0, 8).map((m) => (
+                          <div key={m.id} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4, gap: 6 }}>
+                            <span style={{ color: "var(--t-muted)" }}>
+                              {MOVEMENT_LABELS[m.type] ?? m.type}
+                              {m.reason ? ` · ${m.reason}` : ""}
+                            </span>
+                            <strong>{formatCOP(m.amount)}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => showSessionReport()} disabled={loadingReport} style={{ padding: "8px 14px", borderRadius: 8, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer" }}>
+                    {loadingReport ? "Cargando…" : "Ver reporte X"}
                   </button>
-                  <div style={{ display: "flex", gap: 8 }}>
                   <input
                     placeholder="Efectivo contado"
                     value={closingCash}
                     onChange={(e) => setClosingCash(e.target.value)}
-                    style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                    style={{ padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
+                  />
+                  <input
+                    placeholder="Notas de cierre (opcional)"
+                    value={closeNotes}
+                    onChange={(e) => setCloseNotes(e.target.value)}
+                    style={{ padding: 8, borderRadius: 8, border: "1px solid var(--t-border-strong)" }}
                   />
                   <button onClick={closeCash} style={{ padding: "8px 14px", borderRadius: 8, border: "none", background: "var(--t-red-fg)", color: "var(--t-primary-fg)", cursor: "pointer" }}>
-                    Cerrar caja
+                    Cerrar caja (Z)
                   </button>
-                  </div>
                 </div>
               )}
             </>
@@ -430,9 +668,49 @@ export default function Dashboard({ branchId }: { branchId: string }) {
         </Card>
       </div>
 
+      {closedSessions.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <Card title="Historial de cierres">
+            {closedSessions.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto",
+                  gap: 12,
+                  alignItems: "center",
+                  fontSize: 13,
+                  marginBottom: 10,
+                  paddingBottom: 10,
+                  borderBottom: "1px solid var(--t-border)",
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600 }}>
+                    {new Date(s.openedAt).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}
+                    {s.cashRegisterName ? ` · ${s.cashRegisterName}` : ""}
+                  </div>
+                  <div style={{ fontSize: 12, color: "var(--t-muted)" }}>
+                    Contado {formatCOP(s.closingCash)} · Esp. {formatCOP(s.expectedCash)} · Diff. {formatCOP(s.cashDifference)}
+                    {" · "}{s.invoiceCount} facturas
+                  </div>
+                </div>
+                <button
+                  onClick={() => showSessionReport(s.id)}
+                  disabled={loadingReport}
+                  style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid var(--t-border-strong)", background: "var(--t-card)", cursor: "pointer", fontSize: 12 }}
+                >
+                  Ver Z
+                </button>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
+
       {data.tipsByWaiter?.length > 0 && (
         <div style={{ marginTop: 16 }}>
-          <Card title="Propinas por mesero — hoy">
+          <Card title={`Propinas por mesero${reportFrom === reportTo ? " — día" : " — periodo"}`}>
             {data.tipsByWaiter.map((w) => (
               <div key={w.waiterId} style={{
                 display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 12,
@@ -695,7 +973,7 @@ export default function Dashboard({ branchId }: { branchId: string }) {
       )}
 
       <div style={{ marginTop: 16 }}>
-        <Card title="Pedidos anulados — hoy">
+        <Card title={`Pedidos anulados${reportFrom === reportTo ? " — día" : " — periodo"}`}>
           {(data.voidedOrders?.length ?? 0) === 0 ? (
             <p style={{ color: "var(--t-muted)", fontSize: 14 }}>Sin anulaciones registradas hoy</p>
           ) : (

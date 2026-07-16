@@ -150,6 +150,7 @@ model Branch {
   warehouses  Warehouse[]
   cashRegisters CashRegister[]
   reservations Reservation[]
+  staffShifts StaffShift[]
 }
 
 // ─── Staff (legacy waiter model, coexists with User) ───────────
@@ -174,6 +175,24 @@ model Staff {
   isActive  Boolean   @default(true)
 
   branch Branch @relation(fields: [branchId], references: [id])
+}
+
+/// Asistencia / fichaje de usuarios con login (no confundir con PosSession de caja)
+model StaffShift {
+  id         String    @id @default(uuid())
+  branchId   String
+  userId     String
+  staffId    String?
+  clockInAt  DateTime  @default(now())
+  clockOutAt DateTime?
+  notes      String?
+  createdAt  DateTime  @default(now())
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([branchId, clockInAt])
+  @@index([userId, clockOutAt])
+  @@index([branchId, userId, clockOutAt])
 }
 
 // ─── Catalog ───────────────────────────────────────────────────

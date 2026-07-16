@@ -25,6 +25,7 @@ import MobileBottomNav, {
 } from "../components/MobileBottomNav";
 import MobileMoreSheet from "../components/MobileMoreSheet";
 import PwaInstallBanner from "../components/PwaInstallBanner";
+import ClockShiftButton from "../components/ClockShiftButton";
 import { ensureWaiterKioskUrl, isWaiterUser, shouldUseWaiterKiosk } from "../lib/waiterKiosk";
 import { canAccessAdmin, canViewCash, canViewDashboard, canViewFloor, canViewKds, canViewSettings } from "../lib/auth";
 import { useTheme } from "../lib/theme";
@@ -300,6 +301,7 @@ export default function App() {
         </nav>
 
         <div className="yall-app-actions">
+          {branchId && <ClockShiftButton branchId={branchId} />}
           <span className="yall-hide-mobile yall-app-user">{user.name}</span>
           <button onClick={toggleDark} className="yall-icon-btn" title={dark ? "Modo claro" : "Modo oscuro"}>{dark ? "☀️" : "🌙"}</button>
           <button onClick={logout} className="yall-icon-btn" title="Salir">⎋</button>

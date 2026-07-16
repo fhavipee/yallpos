@@ -107,12 +107,20 @@ export class ReportsService {
       .sort((a, b) => a.compliancePct - b.compliancePct || b.count - a.count);
   }
 
-  async getDashboard(branchId: string) {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+  async getDashboard(branchId: string, fromStr?: string, toStr?: string) {
+    const rangeStart = fromStr ? new Date(`${fromStr}T00:00:00`) : new Date();
+    rangeStart.setHours(0, 0, 0, 0);
+    const rangeEnd = toStr ? new Date(`${toStr}T00:00:00`) : new Date(rangeStart);
+    rangeEnd.setHours(0, 0, 0, 0);
+    rangeEnd.setDate(rangeEnd.getDate() + 1);
+
+    if (rangeEnd <= rangeStart) {
+      rangeEnd.setTime(rangeStart.getTime());
+      rangeEnd.setDate(rangeEnd.getDate() + 1);
+    }
 
     const paidInvoices = await this.prisma.salesInvoice.findMany({
-      where: { branchId, status: "paid", paidAt: { gte: todayStart } },
+      where: { branchId, status: "paid", paidAt: { gte: rangeStart, lt: rangeEnd } },
       include: { payments: true, lines: true, fiscalDocuments: true },
     });
 
@@ -200,14 +208,21 @@ export class ReportsService {
     const tipsByWaiter = [...waiterMap.values()].sort((a, b) => b.tips - a.tips);
 
     const voidedInvoices = await this.prisma.salesInvoice.findMany({
-      where: { branchId, status: "voided", voidedAt: { gte: todayStart } },
+      where: { branchId, status: "voided", voidedAt: { gte: rangeStart, lt: rangeEnd } },
       include: { lines: true },
       orderBy: { voidedAt: "desc" },
     });
     const voidedTotal = voidedInvoices.reduce((s, i) => s + Number(i.total), 0);
 
+    const fromDate = rangeStart.toISOString().slice(0, 10);
+    const toDate = new Date(rangeEnd.getTime() - 1).toISOString().slice(0, 10);
+    const isSingleDay = fromDate === toDate;
+
     return {
-      date: todayStart.toISOString().slice(0, 10),
+      date: fromDate,
+      from: fromDate,
+      to: toDate,
+      isSingleDay,
       branchId,
       summary: {
         totalSales,
@@ -579,10 +594,14 @@ export class ReportsService {
 
   async getCashReport(branchId: string, sessionId?: string) {
     const session = sessionId
-      ? await this.prisma.posSession.findFirst({ where: { id: sessionId, branchId } })
+      ? await this.prisma.posSession.findFirst({
+          where: { id: sessionId, branchId },
+          include: { movements: true, cashRegister: true },
+        })
       : await this.prisma.posSession.findFirst({
           where: { branchId, status: "open" },
           orderBy: { openedAt: "desc" },
+          include: { movements: true, cashRegister: true },
         });
 
     if (!session) return { message: "No hay sesión de caja" };
@@ -601,7 +620,19 @@ export class ReportsService {
     }
 
     const cashIn = byMethod.cash ?? 0;
-    const expectedCash = Number(session.openingCash) + cashIn;
+    let deposits = 0;
+    let withdrawals = 0;
+    let expenses = 0;
+    for (const m of session.movements) {
+      const amt = Number(m.amount);
+      if (m.type === "deposit") deposits += amt;
+      else if (m.type === "withdrawal") withdrawals += amt;
+      else if (m.type === "expense") expenses += amt;
+    }
+    const expectedCash =
+      session.status === "closed"
+        ? Number(session.expectedCash)
+        : Number(session.openingCash) + cashIn + deposits - withdrawals - expenses;
 
     return {
       sessionId: session.id,
@@ -609,12 +640,25 @@ export class ReportsService {
       openedAt: session.openedAt,
       closedAt: session.closedAt,
       openingCash: Number(session.openingCash),
+      cashRegisterId: session.cashRegisterId,
+      cashRegisterName: session.cashRegister?.name ?? null,
       totalSales,
       invoiceCount: invoices.length,
       paymentsByMethod: byMethod,
+      cashSales: cashIn,
+      deposits,
+      withdrawals,
+      expenses,
       expectedCash,
       closingCash: session.closedAt ? Number(session.closingCash) : null,
       difference: session.closedAt ? Number(session.cashDifference) : null,
+      movements: session.movements.map((m) => ({
+        id: m.id,
+        type: m.type,
+        amount: Number(m.amount),
+        reason: m.reason,
+        createdAt: m.createdAt,
+      })),
     };
   }
 }

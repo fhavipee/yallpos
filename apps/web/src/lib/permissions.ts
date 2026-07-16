@@ -53,6 +53,7 @@ export const ADMIN_TAB_PERMISSIONS: Record<AdminTab, string[]> = {
   "daily-menu": ["admin.access", "catalog.manage"],
   floor: ["admin.access", "settings.manage"],
   staff: ["admin.access", "settings.manage"],
+  shifts: ["admin.access", "reports.view"],
   users: ["admin.access", "admin.users"],
   roles: ["admin.access", "admin.roles"],
   kds: ["admin.access", "settings.manage"],

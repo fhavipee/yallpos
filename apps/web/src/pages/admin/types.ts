@@ -8,6 +8,7 @@ export type AdminTab =
   | "daily-menu"
   | "floor"
   | "staff"
+  | "shifts"
   | "users"
   | "roles"
   | "kds"
@@ -50,6 +51,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     tabs: [
       { id: "floor", label: "Mesas", desc: "Áreas y capacidad" },
       { id: "staff", label: "Personal", desc: "Meseros y cocina" },
+      { id: "shifts", label: "Turnos", desc: "Entrada / salida" },
       { id: "users", label: "Usuarios", desc: "Login y asignación" },
       { id: "roles", label: "Roles", desc: "Permisos custom" },
       { id: "kds", label: "KDS", desc: "Estaciones y rutas" },

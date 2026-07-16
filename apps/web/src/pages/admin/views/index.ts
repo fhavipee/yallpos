@@ -9,6 +9,7 @@ import AdminTaxesView from "./AdminTaxesView";
 import AdminDailyMenuView from "./AdminDailyMenuView";
 import AdminFloorView from "./AdminFloorView";
 import AdminStaffView from "./AdminStaffView";
+import AdminShiftsView from "./AdminShiftsView";
 import AdminUsersView from "./AdminUsersView";
 import AdminRolesView from "./AdminRolesView";
 import AdminKdsView from "./AdminKdsView";
@@ -32,6 +33,7 @@ export const ADMIN_VIEWS: Record<AdminTab, ComponentType> = {
   "daily-menu": AdminDailyMenuView,
   floor: AdminFloorView,
   staff: AdminStaffView,
+  shifts: AdminShiftsView,
   users: AdminUsersView,
   roles: AdminRolesView,
   kds: AdminKdsView,

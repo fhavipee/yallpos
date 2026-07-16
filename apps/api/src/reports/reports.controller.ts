@@ -11,8 +11,12 @@ export class ReportsController {
   constructor(private reports: ReportsService) {}
 
   @Get("dashboard")
-  getDashboard(@BranchId() branchId: string) {
-    return this.reports.getDashboard(branchId);
+  getDashboard(
+    @BranchId() branchId: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    return this.reports.getDashboard(branchId, from, to);
   }
 
   @Get("cash")

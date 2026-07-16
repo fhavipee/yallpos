@@ -267,10 +267,14 @@ export async function printSeatingSlip(sessionId: string, reservationId?: string
 }
 
 export async function printReportX(sessionId: string) {
+  return printCashReport(sessionId);
+}
+
+export async function printCashReport(sessionId: string) {
   const config = loadPrinterConfig();
 
   try {
-    const esc = await api.get(`/v1/cash/session/${sessionId}/report-x.escpos`);
+    const esc = await api.get(`/v1/cash/session/${sessionId}/report.escpos`);
     if (await sendToPrintAgent(esc.data.base64, "cash", config)) {
       return { ok: true, methods: ["escpos-caja"] };
     }

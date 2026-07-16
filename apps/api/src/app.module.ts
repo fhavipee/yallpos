@@ -15,6 +15,7 @@ import { SettingsModule } from "./settings/settings.module";
 import { AdminModule } from "./admin/admin.module";
 import { KioskModule } from "./kiosk/kiosk.module";
 import { CustomersModule } from "./customers/customers.module";
+import { StaffShiftsModule } from "./staff-shifts/staff-shifts.module";
 import { HealthController } from "./health.controller";
 
 @Module({
@@ -32,6 +33,7 @@ import { HealthController } from "./health.controller";
     AdminModule,
     KioskModule,
     CustomersModule,
+    StaffShiftsModule,
     RestaurantModule,
     KdsModule,
     PosModule,

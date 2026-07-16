@@ -311,6 +311,30 @@ export type ReportXData = {
   printedAt: string;
 };
 
+export type CashReportEscPosData = {
+  reportType: "X" | "Z";
+  businessName: string;
+  branchName: string;
+  cashRegisterName?: string | null;
+  openedAt: string;
+  closedAt?: string | null;
+  openingCash: number;
+  closingCash?: number | null;
+  cashDifference?: number | null;
+  totalSales: number;
+  totalTips: number;
+  expectedCash: number;
+  cashSales?: number;
+  deposits?: number;
+  withdrawals?: number;
+  expenses?: number;
+  invoiceCount: number;
+  paymentsByMethod: Record<string, number>;
+  movements?: { type: string; amount: number; reason?: string | null }[];
+  notes?: string | null;
+  printedAt: string;
+};
+
 const PAYMENT_LABELS: Record<string, string> = {
   cash: "Efectivo",
   card: "Tarjeta",
@@ -321,32 +345,69 @@ const PAYMENT_LABELS: Record<string, string> = {
   mixed: "Mixto",
 };
 
-export function buildEscPosReportX(data: ReportXData, paperWidth = 32): Buffer {
-  const enc = new EscPosEncoder().init();
+const MOVEMENT_LABELS: Record<string, string> = {
+  deposit: "Deposito",
+  withdrawal: "Retiro",
+  expense: "Gasto",
+};
 
-  enc.align("center").bold(true).size(2, 2).line("REPORTE X").size(1, 1).bold(false);
+export function buildEscPosCashReport(data: CashReportEscPosData, paperWidth = 32): Buffer {
+  const enc = new EscPosEncoder().init();
+  const title = data.reportType === "Z" ? "REPORTE Z" : "REPORTE X";
+
+  enc.align("center").bold(true).size(2, 2).line(title).size(1, 1).bold(false);
   enc.line(data.businessName);
   enc.line(data.branchName);
+  if (data.cashRegisterName) enc.line(data.cashRegisterName);
   enc.separator("=", paperWidth);
   enc.align("left");
   enc.line(`Apertura: ${data.openedAt}`);
+  if (data.closedAt) enc.line(`Cierre:   ${data.closedAt}`);
   enc.line(`Impreso:  ${data.printedAt}`);
   enc.separator("-", paperWidth);
   enc.line(`Ventas:        $${data.totalSales.toLocaleString("es-CO")}`);
   enc.line(`Transacciones: ${data.invoiceCount}`);
   enc.line(`Propinas:      $${data.totalTips.toLocaleString("es-CO")}`);
   enc.line(`Apertura caja: $${data.openingCash.toLocaleString("es-CO")}`);
+  if (data.cashSales != null) enc.line(`Ventas efectivo:$${data.cashSales.toLocaleString("es-CO")}`);
+  if (data.deposits) enc.line(`Depositos:     $${data.deposits.toLocaleString("es-CO")}`);
+  if (data.withdrawals) enc.line(`Retiros:       $${data.withdrawals.toLocaleString("es-CO")}`);
+  if (data.expenses) enc.line(`Gastos:        $${data.expenses.toLocaleString("es-CO")}`);
   enc.line(`Efectivo esp.: $${data.expectedCash.toLocaleString("es-CO")}`);
+  if (data.closingCash != null) {
+    enc.line(`Efectivo cont.:$${data.closingCash.toLocaleString("es-CO")}`);
+    enc.line(`Diferencia:    $${(data.cashDifference ?? 0).toLocaleString("es-CO")}`);
+  }
   enc.separator("-", paperWidth);
   enc.bold(true).line("Medios de pago").bold(false);
   for (const [method, amount] of Object.entries(data.paymentsByMethod)) {
     const label = PAYMENT_LABELS[method] ?? method;
     enc.line(`${label}: $${amount.toLocaleString("es-CO")}`);
   }
+  if (data.movements && data.movements.length > 0) {
+    enc.separator("-", paperWidth);
+    enc.bold(true).line("Movimientos").bold(false);
+    for (const m of data.movements) {
+      const label = MOVEMENT_LABELS[m.type] ?? m.type;
+      const reason = m.reason ? ` ${m.reason}` : "";
+      enc.line(`${label}: $${m.amount.toLocaleString("es-CO")}${reason}`);
+    }
+  }
+  if (data.notes) {
+    enc.separator("-", paperWidth);
+    enc.line(`Notas: ${data.notes}`);
+  }
   enc.separator("=", paperWidth);
-  enc.align("center").line("Caja abierta — no es cierre Z");
+  enc.align("center").line(
+    data.reportType === "Z" ? "Cierre de caja (Z)" : "Caja abierta — no es cierre Z",
+  );
   enc.feed(2).cut();
   return enc.toBuffer();
+}
+
+/** @deprecated use buildEscPosCashReport */
+export function buildEscPosReportX(data: ReportXData, paperWidth = 32): Buffer {
+  return buildEscPosCashReport({ ...data, reportType: "X" }, paperWidth);
 }
 
 export function buildEscPosTest(): Buffer {
