@@ -23,6 +23,12 @@ fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
 
+# HTTPS automático: si hay APP_DOMAIN, activa el perfil "https" (Caddy).
+if [ -n "${APP_DOMAIN:-}" ]; then
+  export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}https"
+  echo "🔒 HTTPS activado para dominio: ${APP_DOMAIN}"
+fi
+
 BRANCH="${DEPLOY_BRANCH:-main}"
 
 echo "═══════════════════════════════════════"

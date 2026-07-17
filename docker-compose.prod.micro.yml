@@ -22,5 +22,11 @@ services:
         limits:
           memory: 96M
 
+  caddy:
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
   redis:
     profiles: ["unused"]

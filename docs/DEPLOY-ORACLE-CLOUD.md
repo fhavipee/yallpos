@@ -153,33 +153,52 @@ Ver progreso: pestaña **Actions** en GitHub.
 
 ---
 
-## Parte 4 — HTTPS con dominio (opcional)
+## Parte 4 — HTTPS (obligatorio para la huella / asistencia biométrica)
 
-Si tienes un dominio (ej. `pos.turestaurante.com`):
+La marcación de asistencia con **huella (WebAuthn)** solo funciona sobre **HTTPS**.
+YallPos ya trae **Caddy** integrado en Docker: obtiene y renueva el certificado
+Let's Encrypt automáticamente. Solo tienes que indicar un dominio.
 
-1. Apunta un registro **A** a la IP de Oracle.
-2. Instala Caddy en la VM:
+### 1. Abrir puertos 80 y 443
+
+En **Oracle → Networking → VCN → Security List → Ingress rules** agrega:
+
+| Puerto | Origen | Descripción |
+|--------|--------|-------------|
+| 80  | 0.0.0.0/0 | HTTP (validación del certificado) |
+| 443 | 0.0.0.0/0 | HTTPS |
+
+(En la VM, `setup-oracle-server.sh` ya abre 80/443 en `ufw`.)
+
+### 2. Elegir dominio
+
+**Opción A — con dominio propio** (ej. `pos.turestaurante.com`):
+apunta un registro **A** a la IP pública de Oracle.
+
+**Opción B — sin comprar dominio** (usa [sslip.io](https://sslip.io)):
+toma tu IP pública y reemplaza los puntos por guiones + `.sslip.io`.
+Ej. IP `140.238.1.2` → `140-238-1-2.sslip.io`. No requiere configurar DNS.
+
+### 3. Configurar y desplegar
+
+En el servidor, edita `/opt/yallpos/.env.production`:
 
 ```bash
-sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update && sudo apt install caddy
+APP_DOMAIN=140-238-1-2.sslip.io   # o pos.turestaurante.com
+ACME_EMAIL=tu-correo@dominio.com
 ```
 
-`/etc/caddy/Caddyfile`:
-
-```
-pos.turestaurante.com {
-    reverse_proxy localhost:8080
-}
-```
+Aplica:
 
 ```bash
-sudo systemctl reload caddy
+cd /opt/yallpos
+./scripts/update-production.sh
 ```
 
-Abre puerto **443** en Oracle Security List.
+El deploy detecta `APP_DOMAIN`, levanta Caddy y emite el certificado.
+Entra por **`https://<APP_DOMAIN>`** y ya podrás registrar y marcar con huella.
+
+> Si dejas `APP_DOMAIN` vacío, todo sigue igual en `http://IP:8080` (sin huella).
 
 ---
 

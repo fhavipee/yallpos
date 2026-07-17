@@ -30,9 +30,11 @@ if ! command -v docker >/dev/null 2>&1; then
   exit 0
 fi
 
-echo "▶ Firewall (SSH + puerto web)"
+echo "▶ Firewall (SSH + puerto web + HTTPS)"
 sudo ufw allow OpenSSH >/dev/null 2>&1 || true
 sudo ufw allow "${WEB_PORT}/tcp" >/dev/null 2>&1 || true
+sudo ufw allow 80/tcp >/dev/null 2>&1 || true
+sudo ufw allow 443/tcp >/dev/null 2>&1 || true
 echo "y" | sudo ufw enable >/dev/null 2>&1 || true
 
 echo "▶ Clonar o actualizar repositorio en $INSTALL_DIR"
@@ -87,4 +89,12 @@ echo "  Actualizar tras cambios en GitHub:"
 echo "    cd $INSTALL_DIR && ./scripts/update-production.sh"
 echo ""
 echo "  Abre también el puerto ${WEB_PORT} en Oracle Cloud → Security List / Ingress Rules."
+echo ""
+echo "  🔒 Para habilitar la HUELLA (asistencia) necesitas HTTPS:"
+echo "     1) En Oracle Security List abre los puertos 80 y 443."
+echo "     2) Edita $INSTALL_DIR/.env.production y define:"
+echo "          APP_DOMAIN=${PUBLIC_IP//./-}.sslip.io   (o tu dominio propio)"
+echo "          ACME_EMAIL=tu-correo@dominio.com"
+echo "     3) Ejecuta: ./scripts/update-production.sh"
+echo "        Luego entra por https://${PUBLIC_IP//./-}.sslip.io"
 echo ""

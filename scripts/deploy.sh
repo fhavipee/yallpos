@@ -28,6 +28,12 @@ if [ "${POSTGRES_PASSWORD:-}" = "cambiar-password-seguro-aqui" ]; then
   exit 1
 fi
 
+# HTTPS automático: si hay APP_DOMAIN, activa el perfil "https" (Caddy).
+if [ -n "${APP_DOMAIN:-}" ]; then
+  export COMPOSE_PROFILES="${COMPOSE_PROFILES:+$COMPOSE_PROFILES,}https"
+  echo "🔒 HTTPS activado para dominio: ${APP_DOMAIN}"
+fi
+
 echo "═══════════════════════════════════════"
 echo " YallPos — Despliegue producción"
 echo "═══════════════════════════════════════"
@@ -50,6 +56,9 @@ LAN_IP="$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{
 echo ""
 echo "✅ YallPos desplegado"
 echo ""
+if [ -n "${APP_DOMAIN:-}" ]; then
+  echo "  HTTPS:    https://${APP_DOMAIN}   (huella habilitada)"
+fi
 echo "  Local:    http://127.0.0.1:${WEB_PORT:-8080}"
 echo "  Red LAN:  http://${LAN_IP}:${WEB_PORT:-8080}"
 echo "  Mesero:   http://${LAN_IP}:${WEB_PORT:-8080}/?view=waiter"

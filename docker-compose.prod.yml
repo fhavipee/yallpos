@@ -68,5 +68,29 @@ services:
       api:
         condition: service_healthy
 
+  # HTTPS automático (Let's Encrypt) — necesario para la huella (WebAuthn).
+  # Se activa solo cuando COMPOSE_PROFILES=https y APP_DOMAIN está definido.
+  # Los scripts de deploy lo activan automáticamente si APP_DOMAIN existe.
+  caddy:
+    image: caddy:2-alpine
+    container_name: yallpos-prod-caddy
+    restart: unless-stopped
+    profiles: ["https"]
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - yallpos_caddy_data:/data
+      - yallpos_caddy_config:/config
+
 volumes:
   yallpos_prod_pgdata:
+  yallpos_caddy_data:
+  yallpos_caddy_config:

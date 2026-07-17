@@ -1,0 +1,17 @@
+# HTTPS automático para YallPos (necesario para huella / WebAuthn).
+# El dominio se define con APP_DOMAIN en .env.production.
+#   - Dominio propio:      pos.turestaurante.com
+#   - Sin comprar dominio: <IP-PUBLICA>.sslip.io  (p.ej. 140-238-1-2.sslip.io)
+#
+# Caddy obtiene y renueva el certificado Let's Encrypt solo,
+# siempre que los puertos 80 y 443 estén abiertos hacia Internet.
+
+{
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	encode gzip zstd
+	# Reenvía todo (web estática + /v1 API + /socket.io) al contenedor web (nginx).
+	reverse_proxy web:80
+}
