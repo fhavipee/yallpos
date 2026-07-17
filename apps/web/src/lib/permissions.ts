@@ -16,11 +16,13 @@ const LEGACY_ROLE_PERMISSIONS: Record<string, string[]> = {
     "kds.view",
     "reports.view",
     "cash.session",
+    "staff.clock",
+    "staff.manage",
   ],
-  cashier: ["pos.floor", "pos.cash", "pos.void", "catalog.view", "cash.session"],
-  waiter: ["pos.floor", "catalog.view"],
-  kitchen: ["kds.view"],
-  baker: ["catalog.view", "catalog.manage"],
+  cashier: ["pos.floor", "pos.cash", "pos.void", "catalog.view", "cash.session", "staff.clock"],
+  waiter: ["pos.floor", "catalog.view", "staff.clock"],
+  kitchen: ["kds.view", "staff.clock"],
+  baker: ["catalog.view", "catalog.manage", "staff.clock"],
 };
 
 export function getUserPermissions(user?: AuthUser | null): string[] {
@@ -53,7 +55,7 @@ export const ADMIN_TAB_PERMISSIONS: Record<AdminTab, string[]> = {
   "daily-menu": ["admin.access", "catalog.manage"],
   floor: ["admin.access", "settings.manage"],
   staff: ["admin.access", "settings.manage"],
-  shifts: ["admin.access", "reports.view"],
+  shifts: ["admin.access", "staff.manage"],
   users: ["admin.access", "admin.users"],
   roles: ["admin.access", "admin.roles"],
   kds: ["admin.access", "settings.manage"],
@@ -121,6 +123,18 @@ export function canViewCash(user?: AuthUser | null): boolean {
 
 export function canViewDashboard(user?: AuthUser | null): boolean {
   return hasPermission(user, "reports.view") || hasPermission(user, "admin.access");
+}
+
+export function canClockAttendance(user?: AuthUser | null): boolean {
+  return (
+    hasPermission(user, "staff.clock") ||
+    hasPermission(user, "staff.manage") ||
+    ["owner", "manager", "cashier", "waiter", "kitchen", "baker"].includes(user?.role ?? "")
+  );
+}
+
+export function canManageStaffShifts(user?: AuthUser | null): boolean {
+  return hasPermission(user, "staff.manage") || user?.role === "owner" || user?.role === "manager";
 }
 
 export function canViewSettings(user?: AuthUser | null): boolean {

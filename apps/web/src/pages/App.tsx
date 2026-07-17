@@ -27,7 +27,7 @@ import MobileMoreSheet from "../components/MobileMoreSheet";
 import PwaInstallBanner from "../components/PwaInstallBanner";
 import Attendance from "./Attendance";
 import { ensureWaiterKioskUrl, isWaiterUser, shouldUseWaiterKiosk } from "../lib/waiterKiosk";
-import { canAccessAdmin, canViewCash, canViewDashboard, canViewFloor, canViewKds, canViewSettings } from "../lib/auth";
+import { canAccessAdmin, canClockAttendance, canViewCash, canViewDashboard, canViewFloor, canViewKds, canViewSettings } from "../lib/auth";
 import { useTheme } from "../lib/theme";
 import { useIsTablet } from "../lib/useMediaQuery";
 import { useSwipeTabs } from "../lib/useSwipeTabs";
@@ -98,6 +98,7 @@ export default function App() {
     if (tab === "admin" && user && !canAccessAdmin(user)) setTab("counter");
     if (tab === "kds" && user && !canViewKds(user)) setTab("counter");
     if (tab === "dashboard" && user && !canViewDashboard(user)) setTab("counter");
+    if (tab === "attendance" && user && !canClockAttendance(user)) setTab("counter");
   }, [tab, user]);
 
   useEffect(() => {

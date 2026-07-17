@@ -31,7 +31,16 @@ export class PermissionsService {
           isSystem: true,
           isActive: true,
         },
-        update: {},
+        // Roles de sistema: se sincronizan con la plantilla (nombre, descripción, permisos).
+        // Roles custom del tenant no se tocan.
+        update: {
+          name: tpl.name,
+          description: tpl.description,
+          permissions: tpl.permissions,
+          legacyRole: tpl.legacyRole,
+          isSystem: true,
+          isActive: true,
+        },
       });
     }
 

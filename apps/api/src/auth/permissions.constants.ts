@@ -21,6 +21,8 @@ export const PERMISSION_CATALOG: PermissionDef[] = [
   { key: "kds.view", label: "Pantalla KDS", group: "Operación POS" },
   { key: "reports.view", label: "Reportes", group: "Reportes" },
   { key: "cash.session", label: "Sesiones de caja", group: "Caja" },
+  { key: "staff.clock", label: "Marcar asistencia", group: "Asistencia", description: "Llegada/salida con huella o PIN" },
+  { key: "staff.manage", label: "Gestionar turnos", group: "Asistencia", description: "Programar turnos y ver quién está en el local" },
 ];
 
 export const ALL_PERMISSION_KEYS = PERMISSION_CATALOG.map((p) => p.key);
@@ -68,6 +70,8 @@ export const SYSTEM_ROLE_TEMPLATES: SystemRoleTemplate[] = [
       "kds.view",
       "reports.view",
       "cash.session",
+      "staff.clock",
+      "staff.manage",
     ],
   },
   {
@@ -75,28 +79,28 @@ export const SYSTEM_ROLE_TEMPLATES: SystemRoleTemplate[] = [
     name: "Cajero",
     legacyRole: "cashier",
     description: "Caja, cobros y mesas",
-    permissions: ["pos.floor", "pos.cash", "pos.void", "catalog.view", "cash.session"],
+    permissions: ["pos.floor", "pos.cash", "pos.void", "catalog.view", "cash.session", "staff.clock"],
   },
   {
     slug: "waiter",
     name: "Mesero",
     legacyRole: "waiter",
     description: "Mesas, pedidos y modo mesero",
-    permissions: ["pos.floor", "catalog.view"],
+    permissions: ["pos.floor", "catalog.view", "staff.clock"],
   },
   {
     slug: "kitchen",
     name: "Cocina",
     legacyRole: "kitchen",
     description: "Pantalla KDS",
-    permissions: ["kds.view"],
+    permissions: ["kds.view", "staff.clock"],
   },
   {
     slug: "baker",
     name: "Panadero",
     legacyRole: "baker",
     description: "Catálogo operativo",
-    permissions: ["catalog.view", "catalog.manage"],
+    permissions: ["catalog.view", "catalog.manage", "staff.clock"],
   },
 ];
 

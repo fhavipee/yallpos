@@ -6,7 +6,7 @@ import {
 } from "@simplewebauthn/browser";
 import { api } from "../lib/api";
 import { getStoredAuth } from "../lib/auth";
-import { canViewDashboard } from "../lib/permissions";
+import { canManageStaffShifts } from "../lib/permissions";
 
 type ScheduleRow = {
   id: string;
@@ -73,7 +73,7 @@ const STATUS_LABEL: Record<string, string> = {
 
 export default function Attendance({ branchId }: { branchId: string }) {
   const user = getStoredAuth()?.user;
-  const isManager = !!user && canViewDashboard(user);
+  const isManager = !!user && canManageStaffShifts(user);
   const [home, setHome] = useState<Home | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [credentials, setCredentials] = useState<BiometricCredential[]>([]);

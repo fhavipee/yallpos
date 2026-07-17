@@ -179,24 +179,27 @@ apunta un registro **A** a la IP pública de Oracle.
 toma tu IP pública y reemplaza los puntos por guiones + `.sslip.io`.
 Ej. IP `140.238.1.2` → `140-238-1-2.sslip.io`. No requiere configurar DNS.
 
-### 3. Configurar y desplegar
+### 3. Activar (script automático)
 
-En el servidor, edita `/opt/yallpos/.env.production`:
-
-```bash
-APP_DOMAIN=140-238-1-2.sslip.io   # o pos.turestaurante.com
-ACME_EMAIL=tu-correo@dominio.com
-```
-
-Aplica:
+Con los puertos 80/443 abiertos:
 
 ```bash
 cd /opt/yallpos
-./scripts/update-production.sh
+./scripts/enable-https.sh --email tu-correo@dominio.com
 ```
 
-El deploy detecta `APP_DOMAIN`, levanta Caddy y emite el certificado.
-Entra por **`https://<APP_DOMAIN>`** y ya podrás registrar y marcar con huella.
+El script detecta la IP pública, arma `APP_DOMAIN` con sslip.io, escribe
+`.env.production` y levanta Caddy. Entra por la URL `https://…` que imprime.
+
+Opciones útiles:
+
+```bash
+# Solo escribir el dominio, sin reiniciar (activar después)
+./scripts/enable-https.sh --skip-deploy --email tu@correo.com
+
+# Con dominio propio (registro A apuntando a la IP de Oracle)
+./scripts/enable-https.sh --domain pos.turestaurante.com --email tu@correo.com
+```
 
 > Si dejas `APP_DOMAIN` vacío, todo sigue igual en `http://IP:8080` (sin huella).
 

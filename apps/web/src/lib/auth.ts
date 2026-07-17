@@ -50,8 +50,10 @@ export async function refreshStoredUser(apiGetMe: () => Promise<{ user: AuthUser
 
 export {
   canAccessAdmin,
+  canClockAttendance,
   canManageConfig,
   canManageRoles,
+  canManageStaffShifts,
   canVoidInvoice,
   canViewCash,
   canViewDashboard,
