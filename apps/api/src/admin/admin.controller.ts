@@ -28,6 +28,7 @@ import {
   UpsertTenantRoleDto,
   UpsertUserDto,
   UpsertWarehouseDto,
+  CreatePermissionDto,
 } from "./dto/admin.dto";
 
 @Controller("v1/admin")
@@ -198,8 +199,18 @@ export class AdminController {
   }
 
   @Get("permissions")
-  listPermissions() {
-    return this.admin.listPermissions();
+  listPermissions(@CurrentUser() user: AuthUser) {
+    return this.admin.listPermissions(user);
+  }
+
+  @Post("permissions")
+  createPermission(@CurrentUser() user: AuthUser, @Body() dto: CreatePermissionDto) {
+    return this.admin.createPermission(user, dto);
+  }
+
+  @Delete("permissions/:key")
+  deletePermission(@CurrentUser() user: AuthUser, @Param("key") key: string) {
+    return this.admin.deletePermission(user, key);
   }
 
   @Get("roles")

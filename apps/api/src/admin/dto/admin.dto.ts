@@ -77,6 +77,12 @@ export class UpsertTenantRoleDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
+export class CreatePermissionDto {
+  @IsString() @MinLength(2) @MaxLength(60) label!: string;
+  @IsOptional() @IsString() @MaxLength(40) group?: string;
+  @IsOptional() @IsString() @MaxLength(160) description?: string;
+}
+
 export class ResetPasswordDto {
   @IsString() @MinLength(6) password!: string;
 }

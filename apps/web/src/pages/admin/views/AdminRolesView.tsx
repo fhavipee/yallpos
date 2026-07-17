@@ -16,7 +16,7 @@ import {
   adminStyles,
 } from "../components/AdminUi";
 
-type PermissionDef = { key: string; label: string; group: string; description?: string };
+type PermissionDef = { key: string; label: string; group: string; description?: string; custom?: boolean };
 type TenantRole = {
   id: string;
   name: string;
@@ -40,6 +40,9 @@ export default function AdminRolesView() {
   const [modal, setModal] = useState<"new" | TenantRole | null>(null);
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
+  const [permModal, setPermModal] = useState(false);
+  const [permForm, setPermForm] = useState({ label: "", group: "", description: "" });
+  const [savingPerm, setSavingPerm] = useState(false);
 
   const { data, loading, error, reload } = useAdminResource(async () => {
     const [rolesRes, permsRes] = await Promise.all([
@@ -92,6 +95,30 @@ export default function AdminRolesView() {
         ? f.permissions.filter((p) => p !== key)
         : [...f.permissions, key],
     }));
+  }
+
+  async function savePermission() {
+    setSavingPerm(true);
+    await runAction(async () => {
+      await api.post("/v1/admin/permissions", {
+        label: permForm.label.trim(),
+        group: permForm.group.trim() || undefined,
+        description: permForm.description.trim() || undefined,
+      });
+      setPermModal(false);
+      setPermForm({ label: "", group: "", description: "" });
+      await reload();
+    }, "Opción de permiso creada");
+    setSavingPerm(false);
+  }
+
+  async function deletePermission(key: string, label: string) {
+    if (!window.confirm(`¿Eliminar la opción de permiso "${label}"? Se quitará de los roles que la usen.`)) return;
+    await runAction(async () => {
+      await api.delete(`/v1/admin/permissions/${encodeURIComponent(key)}`);
+      setForm((f) => ({ ...f, permissions: f.permissions.filter((p) => p !== key) }));
+      await reload();
+    }, "Opción eliminada");
   }
 
   async function save() {
@@ -201,24 +228,84 @@ export default function AdminRolesView() {
               </select>
             </Field>
             <div style={{ marginTop: 8 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--t-muted)", marginBottom: 8 }}>
-                Permisos ({form.permissions.length})
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--t-muted)" }}>
+                  Permisos ({form.permissions.length})
+                </div>
+                <button type="button" style={adminStyles.btnSecondary} onClick={() => setPermModal(true)}>
+                  + Nueva opción
+                </button>
               </div>
               {grouped.map(([group, perms]) => (
                 <div key={group} style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: "var(--t-muted)", textTransform: "uppercase", marginBottom: 6 }}>{group}</div>
                   {perms.map((p) => (
-                    <CheckboxField
-                      key={p.key}
-                      label={p.label}
-                      hint={p.description}
-                      checked={form.permissions.includes(p.key)}
-                      onChange={() => togglePermission(p.key)}
-                    />
+                    <div key={p.key} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <CheckboxField
+                          label={p.custom ? `${p.label} (custom)` : p.label}
+                          hint={p.description}
+                          checked={form.permissions.includes(p.key)}
+                          onChange={() => togglePermission(p.key)}
+                        />
+                      </div>
+                      {p.custom && (
+                        <button
+                          type="button"
+                          title="Eliminar opción personalizada"
+                          style={{ ...adminStyles.btnDanger, padding: "2px 8px", marginTop: 2 }}
+                          onClick={() => deletePermission(p.key, p.label)}
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               ))}
             </div>
+          </AdminModal>
+        )}
+
+        {permModal && (
+          <AdminModal
+            title="Nueva opción de permiso"
+            onClose={() => setPermModal(false)}
+            footer={
+              <ModalFooter
+                onCancel={() => setPermModal(false)}
+                onSave={savePermission}
+                saving={savingPerm}
+                disabled={permForm.label.trim().length < 2}
+              />
+            }
+          >
+            <p style={{ fontSize: 12, color: "var(--t-muted)", marginTop: 0 }}>
+              Agrega una opción a la lista de permisos. Queda disponible para asignarla a cualquier rol.
+            </p>
+            <Field label="Nombre de la opción">
+              <input
+                style={adminStyles.input}
+                value={permForm.label}
+                onChange={(e) => setPermForm({ ...permForm, label: e.target.value })}
+                placeholder="Ej. Aplicar descuentos"
+              />
+            </Field>
+            <Field label="Grupo" hint="Encabezado bajo el que se mostrará (opcional)">
+              <input
+                style={adminStyles.input}
+                value={permForm.group}
+                onChange={(e) => setPermForm({ ...permForm, group: e.target.value })}
+                placeholder="Personalizados"
+              />
+            </Field>
+            <Field label="Descripción (opcional)">
+              <input
+                style={adminStyles.input}
+                value={permForm.description}
+                onChange={(e) => setPermForm({ ...permForm, description: e.target.value })}
+              />
+            </Field>
           </AdminModal>
         )}
       </>

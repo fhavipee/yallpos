@@ -34,6 +34,7 @@ import {
   UpsertTenantRoleDto,
   UpsertUserDto,
   UpsertWarehouseDto,
+  CreatePermissionDto,
 } from "./dto/admin.dto";
 import { BranchType, BusinessVertical, FiscalDocType, StaffRole, TaxKind, UserRole } from "@prisma/client";
 import * as fs from "fs";
@@ -743,8 +744,55 @@ export class AdminService {
     return updated;
   }
 
-  listPermissions() {
-    return this.permissions.getCatalog();
+  listPermissions(user: AuthUser) {
+    return this.permissions.getCatalogForTenant(user.tenantId);
+  }
+
+  async createPermission(user: AuthUser, dto: CreatePermissionDto) {
+    if (!hasPermission(user.permissions, "*") && !hasPermission(user.permissions, "admin.roles")) {
+      throw new BadRequestException("No tienes permiso para gestionar permisos");
+    }
+    try {
+      const perm = await this.permissions.addCustomPermission(user.tenantId, {
+        label: dto.label,
+        group: dto.group,
+        description: dto.description,
+      });
+      await this.audit.log({
+        tenantId: user.tenantId,
+        userId: user.id,
+        action: "create",
+        entity: "permission",
+        entityId: perm.key,
+        payload: { label: perm.label, group: perm.group },
+      });
+      return perm;
+    } catch (e) {
+      const code = e instanceof Error ? e.message : "";
+      if (code === "PERMISSION_EXISTS") throw new BadRequestException("Ya existe una opción con ese nombre");
+      if (code === "PERMISSION_LABEL_REQUIRED") throw new BadRequestException("El nombre es obligatorio");
+      if (code === "PERMISSION_LABEL_INVALID") throw new BadRequestException("Nombre de permiso inválido");
+      throw e;
+    }
+  }
+
+  async deletePermission(user: AuthUser, key: string) {
+    if (!hasPermission(user.permissions, "*") && !hasPermission(user.permissions, "admin.roles")) {
+      throw new BadRequestException("No tienes permiso para gestionar permisos");
+    }
+    if (!key.startsWith("custom.")) {
+      throw new BadRequestException("Solo se pueden eliminar permisos personalizados");
+    }
+    const res = await this.permissions.removeCustomPermission(user.tenantId, key);
+    if (!res.ok) throw new NotFoundException("Permiso no encontrado");
+    await this.audit.log({
+      tenantId: user.tenantId,
+      userId: user.id,
+      action: "delete",
+      entity: "permission",
+      entityId: key,
+    });
+    return res;
   }
 
   async listRoles(user: AuthUser) {
@@ -780,7 +828,7 @@ export class AdminService {
     if (!slug) throw new BadRequestException("Nombre de rol inválido");
     if (SYSTEM_ROLE_SLUGS.has(slug)) throw new BadRequestException("Ese slug está reservado para roles del sistema");
 
-    const permissions = this.permissions.sanitizePermissions(dto.permissions);
+    const permissions = await this.permissions.sanitizePermissionsForTenant(user.tenantId, dto.permissions);
     if (!permissions.length) throw new BadRequestException("Selecciona al menos un permiso");
 
     const created = await this.prisma.tenantRole.create({
@@ -814,7 +862,7 @@ export class AdminService {
     if (!role) throw new NotFoundException("Rol no encontrado");
     if (role.isSystem) throw new BadRequestException("Los roles del sistema no se editan — duplícalo como rol custom");
 
-    const permissions = this.permissions.sanitizePermissions(dto.permissions);
+    const permissions = await this.permissions.sanitizePermissionsForTenant(user.tenantId, dto.permissions);
     if (!permissions.length) throw new BadRequestException("Selecciona al menos un permiso");
 
     const updated = await this.prisma.tenantRole.update({
