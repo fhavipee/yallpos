@@ -151,6 +151,7 @@ model Branch {
   cashRegisters CashRegister[]
   reservations Reservation[]
   staffShifts StaffShift[]
+  staffSchedules StaffSchedule[]
 }
 
 // ─── Staff (legacy waiter model, coexists with User) ───────────
@@ -193,6 +194,27 @@ model StaffShift {
   @@index([branchId, clockInAt])
   @@index([userId, clockOutAt])
   @@index([branchId, userId, clockOutAt])
+}
+
+/// Turno programado (quién *debe* trabajar). Distinto del fichaje real (StaffShift).
+model StaffSchedule {
+  id        String   @id @default(uuid())
+  branchId  String
+  userId    String
+  staffId   String?
+  /// Día del turno
+  workDate  DateTime @db.Date
+  startTime String
+  endTime   String
+  label     String?
+  notes     String?
+  createdAt DateTime @default(now())
+  createdBy String?
+
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@index([branchId, workDate])
+  @@index([userId, workDate])
 }
 
 // ─── Catalog ───────────────────────────────────────────────────

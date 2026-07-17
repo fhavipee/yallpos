@@ -25,7 +25,7 @@ import MobileBottomNav, {
 } from "../components/MobileBottomNav";
 import MobileMoreSheet from "../components/MobileMoreSheet";
 import PwaInstallBanner from "../components/PwaInstallBanner";
-import ClockShiftButton from "../components/ClockShiftButton";
+import Attendance from "./Attendance";
 import { ensureWaiterKioskUrl, isWaiterUser, shouldUseWaiterKiosk } from "../lib/waiterKiosk";
 import { canAccessAdmin, canViewCash, canViewDashboard, canViewFloor, canViewKds, canViewSettings } from "../lib/auth";
 import { useTheme } from "../lib/theme";
@@ -301,7 +301,6 @@ export default function App() {
         </nav>
 
         <div className="yall-app-actions">
-          {branchId && <ClockShiftButton branchId={branchId} />}
           <span className="yall-hide-mobile yall-app-user">{user.name}</span>
           <button onClick={toggleDark} className="yall-icon-btn" title={dark ? "Modo claro" : "Modo oscuro"}>{dark ? "☀️" : "🌙"}</button>
           <button onClick={logout} className="yall-icon-btn" title="Salir">⎋</button>
@@ -355,6 +354,7 @@ export default function App() {
         )}
         {branchId && tab === "kds" && <Kds branchId={branchId} />}
         {branchId && tab === "menu" && <MenuPage branchId={branchId} />}
+        {branchId && tab === "attendance" && <Attendance branchId={branchId} />}
         {branchId && tab === "dashboard" && <Dashboard branchId={branchId} />}
         {branchId && tab === "settings" && <SettingsPage branchId={branchId} />}
         {branchId && canAccessAdmin(user) && tab === "admin" && (

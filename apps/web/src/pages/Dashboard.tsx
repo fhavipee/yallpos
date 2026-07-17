@@ -212,6 +212,7 @@ export default function Dashboard({ branchId }: { branchId: string }) {
   const [savingMovement, setSavingMovement] = useState(false);
   const [reportFrom, setReportFrom] = useState(todayISO);
   const [reportTo, setReportTo] = useState(todayISO);
+  const [staffOnDuty, setStaffOnDuty] = useState<{ userName: string; clockInAt: string; hours: number }[]>([]);
   const [serviceTimes, setServiceTimes] = useState<TableServiceTimes | null>(null);
   const [weeklyTimes, setWeeklyTimes] = useState<WeeklyServiceTimes | null>(null);
   const [weekStart, setWeekStart] = useState(() => getWeekStartMonday());
@@ -221,13 +222,14 @@ export default function Dashboard({ branchId }: { branchId: string }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [dash, cashReport, timesReport, weeklyReport, regs, sess] = await Promise.all([
+      const [dash, cashReport, timesReport, weeklyReport, regs, sess, shiftsToday] = await Promise.all([
         api.get("/v1/reports/dashboard", { params: { from: reportFrom, to: reportTo } }),
         api.get("/v1/reports/cash"),
         api.get("/v1/reports/table-service-times").catch(() => ({ data: null })),
         api.get("/v1/reports/table-service-times/weekly", { params: { weekStart } }).catch(() => ({ data: null })),
         api.get("/v1/cash/registers").catch(() => ({ data: [] })),
         api.get("/v1/cash/sessions", { params: { take: 10 } }).catch(() => ({ data: [] })),
+        api.get("/v1/staff-shifts", { params: { from: todayISO(), to: todayISO() } }).catch(() => ({ data: null })),
       ]);
       setData(dash.data);
       setCash(cashReport.data);
@@ -235,6 +237,14 @@ export default function Dashboard({ branchId }: { branchId: string }) {
       setWeeklyTimes(weeklyReport.data);
       setRegisters(regs.data ?? []);
       setSessions(sess.data ?? []);
+      const openShifts = (shiftsToday.data?.shifts ?? []).filter((s: { open: boolean }) => s.open);
+      setStaffOnDuty(
+        openShifts.map((s: { userName: string; clockInAt: string; hours: number }) => ({
+          userName: s.userName,
+          clockInAt: s.clockInAt,
+          hours: s.hours,
+        })),
+      );
     } finally {
       setLoading(false);
     }
@@ -503,7 +513,30 @@ export default function Dashboard({ branchId }: { branchId: string }) {
         <Kpi label="Contingencia" value={String(data.summary.fiscalContingency)} accent={data.summary.fiscalContingency ? "#dc2626" : "#94a3b8"} />
         <Kpi label="Anulados" value={String(data.summary.voidedCount ?? 0)} accent="#dc2626" />
         <Kpi label="Valor anulado" value={formatCOP(data.summary.voidedTotal ?? 0)} accent="#b91c1c" />
+        <Kpi label="Personal en local" value={String(staffOnDuty.length)} accent="#0f766e" />
       </div>
+
+      {staffOnDuty.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <Card title="Personal en el local ahora">
+            <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--t-muted)" }}>
+              Quienes marcaron llegada y aún no salida (asistencia, no caja).
+            </p>
+            {staffOnDuty.map((s) => (
+              <div
+                key={`${s.userName}-${s.clockInAt}`}
+                style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginBottom: 6 }}
+              >
+                <span>{s.userName}</span>
+                <span style={{ color: "var(--t-muted)" }}>
+                  desde {new Date(s.clockInAt).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}
+                  {" · "}{s.hours} h
+                </span>
+              </div>
+            ))}
+          </Card>
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
         <Card title="Ventas por hora">

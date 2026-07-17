@@ -16,6 +16,7 @@ export type AppTab =
   | "host"
   | "kds"
   | "menu"
+  | "attendance"
   | "dashboard"
   | "pilot"
   | "training"
@@ -31,6 +32,7 @@ export const APP_TAB_LABELS: Record<AppTab, string> = {
   host: "Host",
   kds: "KDS",
   menu: "Menú",
+  attendance: "Asistencia",
   dashboard: "Dashboard",
   pilot: "Piloto",
   training: "Capacitación",
@@ -144,6 +146,7 @@ export function buildMoreMenuItems(
   }
   if (canViewCash(user) || canViewFloor(user)) add("pickup-board");
   if (canViewKds(user)) add("kds");
+  add("attendance");
   if (canViewDashboard(user)) add("dashboard");
   add("pilot");
   if (canViewSettings(user)) add("settings");
@@ -163,6 +166,7 @@ export function buildBottomNavItems(
 
   if (role === "kitchen" || role === "baker") {
     if (canViewKds(user)) items.push({ id: "kds", icon: "🍳", label: "KDS" });
+    items.push({ id: "attendance", icon: "⏱️", label: "Asist." });
     return items.slice(0, MAX_BOTTOM_TABS);
   }
 
@@ -171,7 +175,7 @@ export function buildBottomNavItems(
       items.push({ id: "counter", icon: "🛒", label: "Mostrador" });
       items.push({ id: "pickup-board", icon: "📦", label: "Retiro" });
     }
-    if (canViewDashboard(user)) items.push({ id: "dashboard", icon: "📊", label: "Dash" });
+    items.push({ id: "attendance", icon: "⏱️", label: "Asist." });
     return items.slice(0, MAX_BOTTOM_TABS);
   }
 
@@ -183,8 +187,8 @@ export function buildBottomNavItems(
       label: "Comanda",
       disabled: !hasTableSession,
     });
+    items.push({ id: "attendance", icon: "⏱️", label: "Asist." });
     items.push({ id: "menu", icon: "📖", label: "Menú" });
-    items.push({ id: "host", icon: "🛎️", label: "Host" });
     return items.slice(0, MAX_BOTTOM_TABS);
   }
 
@@ -209,6 +213,10 @@ export function buildBottomNavItems(
     items.push({ id: "kds", icon: "🍳", label: "KDS" });
   } else if (canViewDashboard(user)) {
     items.push({ id: "dashboard", icon: "📊", label: "Dash" });
+  }
+
+  if (!items.some((i) => i.id === "attendance")) {
+    items.push({ id: "attendance", icon: "⏱️", label: "Asist." });
   }
 
   return items.slice(0, MAX_BOTTOM_TABS);
