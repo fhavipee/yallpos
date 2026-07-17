@@ -362,6 +362,65 @@ export class StaffShiftsService {
     };
   }
 
+  /**
+   * Marcación tipo reloj: valida que el usuario esté activo y alterna
+   * llegada/salida según tenga o no un turno abierto.
+   */
+  async clockToggle(branchId: string, user: { id: string; name: string; isActive: boolean }) {
+    if (!user.isActive) {
+      throw new BadRequestException(
+        `${user.name}: tu usuario está inactivo, no estás habilitado para trabajar. Contacta a tu gerente.`,
+      );
+    }
+
+    const open = await this.prisma.staffShift.findFirst({
+      where: { branchId, userId: user.id, clockOutAt: null },
+      orderBy: { clockInAt: "desc" },
+    });
+
+    if (open) {
+      const shift = await this.prisma.staffShift.update({
+        where: { id: open.id },
+        data: { clockOutAt: new Date() },
+      });
+      return {
+        action: "clock-out" as const,
+        userName: user.name,
+        clockInAt: shift.clockInAt,
+        clockOutAt: shift.clockOutAt,
+        hours: hoursBetween(shift.clockInAt, shift.clockOutAt!),
+      };
+    }
+
+    const staffId = await this.resolveStaffId(branchId, user.id);
+    const shift = await this.prisma.staffShift.create({
+      data: { branchId, userId: user.id, staffId },
+    });
+    return {
+      action: "clock-in" as const,
+      userName: user.name,
+      clockInAt: shift.clockInAt,
+    };
+  }
+
+  /** Fallback: identificar por PIN (equipos sin sensor de huella). */
+  async findUserByPin(tenantId: string, pin: string) {
+    const { verifyPin, isValidPinFormat } = await import("../common/pin.util");
+    if (!isValidPinFormat(pin)) {
+      throw new BadRequestException("PIN debe ser de 4 a 6 dígitos");
+    }
+    const users = await this.prisma.user.findMany({
+      where: { tenantId, pinHash: { not: null } },
+      select: { id: true, name: true, isActive: true, pinHash: true },
+    });
+    for (const row of users) {
+      if (row.pinHash && verifyPin(pin, row.pinHash)) {
+        return { id: row.id, name: row.name, isActive: row.isActive };
+      }
+    }
+    throw new BadRequestException("PIN no reconocido");
+  }
+
   async getMyAttendanceHome(branchId: string, userId: string) {
     const today = dateOnlyISO(new Date());
     const weekEnd = new Date();

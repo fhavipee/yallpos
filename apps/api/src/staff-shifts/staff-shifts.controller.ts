@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Headers, Param, Patch, Post, Query } from "@nestjs/common";
 import { UserRole } from "@prisma/client";
 import { BranchId } from "../common/decorators/branch-id.decorator";
 import { CurrentUser } from "../auth/decorators/current-user.decorator";
 import { Roles } from "../auth/decorators/roles.decorator";
 import { AuthUser, MANAGEMENT_ROLES } from "../auth/auth.types";
 import { StaffShiftsService } from "./staff-shifts.service";
+import { BiometricService } from "./biometric.service";
 import { ClockShiftDto } from "./dto/clock-shift.dto";
 import { CreateStaffScheduleDto } from "./dto/create-staff-schedule.dto";
 import { UpdateStaffScheduleDto } from "./dto/update-staff-schedule.dto";
@@ -20,7 +21,69 @@ const SHIFT_ROLES: UserRole[] = [
 
 @Controller("v1/staff-shifts")
 export class StaffShiftsController {
-  constructor(private shifts: StaffShiftsService) {}
+  constructor(
+    private shifts: StaffShiftsService,
+    private biometric: BiometricService,
+  ) {}
+
+  // ── Biometría (huella del dispositivo / WebAuthn) ──────────────
+
+  @Get("biometric/credentials")
+  @Roles(...SHIFT_ROLES)
+  listBiometric(@CurrentUser() user: AuthUser) {
+    return this.biometric.listCredentials(user.id);
+  }
+
+  @Delete("biometric/credentials/:id")
+  @Roles(...SHIFT_ROLES)
+  deleteBiometric(@CurrentUser() user: AuthUser, @Param("id") id: string) {
+    return this.biometric.deleteCredential(user.id, id);
+  }
+
+  @Post("biometric/register-options")
+  @Roles(...SHIFT_ROLES)
+  biometricRegisterOptions(@CurrentUser() user: AuthUser, @Headers("origin") origin?: string) {
+    return this.biometric.registrationOptions(user.id, user.name, origin);
+  }
+
+  @Post("biometric/register-verify")
+  @Roles(...SHIFT_ROLES)
+  biometricRegisterVerify(
+    @CurrentUser() user: AuthUser,
+    @Body() body: { response: any; deviceName?: string },
+    @Headers("origin") origin?: string,
+  ) {
+    return this.biometric.verifyRegistration(user.id, origin, body.response, body.deviceName);
+  }
+
+  @Post("biometric/clock-options")
+  @Roles(...SHIFT_ROLES)
+  biometricClockOptions(@Headers("origin") origin?: string) {
+    return this.biometric.clockOptions(origin);
+  }
+
+  @Post("biometric/clock-verify")
+  @Roles(...SHIFT_ROLES)
+  async biometricClockVerify(
+    @BranchId() branchId: string,
+    @Body() body: { sessionId: string; response: any },
+    @Headers("origin") origin?: string,
+  ) {
+    const identified = await this.biometric.identifyByAssertion(origin, body.sessionId, body.response);
+    return this.shifts.clockToggle(branchId, identified);
+  }
+
+  /** Fallback: marcar con PIN de empleado (equipos sin sensor). */
+  @Post("clock-pin")
+  @Roles(...SHIFT_ROLES)
+  async clockWithPin(
+    @BranchId() branchId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() body: { pin: string },
+  ) {
+    const identified = await this.shifts.findUserByPin(user.tenantId, body.pin ?? "");
+    return this.shifts.clockToggle(branchId, identified);
+  }
 
   @Get("home")
   @Roles(...SHIFT_ROLES)

@@ -17,6 +17,7 @@
     "@nestjs/platform-socket.io": "^10.4.0",
     "@nestjs/websockets": "^10.4.0",
     "@prisma/client": "^5.20.0",
+    "@simplewebauthn/server": "^13.3.2",
     "adm-zip": "^0.5.16",
     "axios": "^1.7.9",
     "class-transformer": "^0.5.1",

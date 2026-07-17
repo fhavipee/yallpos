@@ -196,6 +196,21 @@ model StaffShift {
   @@index([branchId, userId, clockOutAt])
 }
 
+/// Credencial WebAuthn (huella/biometría del dispositivo) para marcar asistencia
+model WebAuthnCredential {
+  id           String    @id @default(uuid())
+  userId       String
+  credentialId String    @unique
+  publicKey    String
+  counter      Int       @default(0)
+  transports   String?
+  deviceName   String?
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([userId])
+}
+
 /// Turno programado (quién *debe* trabajar). Distinto del fichaje real (StaffShift).
 model StaffSchedule {
   id        String   @id @default(uuid())
